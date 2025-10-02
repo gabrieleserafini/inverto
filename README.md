@@ -1,36 +1,41 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Setup
+1. `cp .env.local.example .env.local` e imposta le variabili.
+2. `npm install`
+3. `npm run dev` → http://localhost:3000
+4. Studio: http://localhost:3000/studio
 
-## Getting Started
 
-First, run the development server:
+## API
+- POST `/api/track` → ingest eventi (batch)
+- GET `/api/c/[code]` → shortlink → clickId + redirect
+- GET `/api/cron/aggregate` → aggregazione giornaliera
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Test rapido
+- Importa seed: `sanity dataset import scripts/seed.ndjson <dataset>`
+- Visita `/api/c/ABCD` (se seed presente) → redirect con `ci,cr,ck`
+- Inietta SDK in una pagina test e invia `purchase`
+- Chiama `/api/cron/aggregate` → genera `campaignMetricsDaily`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Avvia lo Studio su /studio e inserisci:
 
-## Learn More
+una campaign (es. campaignId="cmp-demo-1"),
 
-To learn more about Next.js, take a look at the following resources:
+un creator (es. creatorId="cr-roberto"),
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+un campaignCreatorLink con landingUrl = http://localhost:3000/sandbox, shortCode="ABCD", opzionale couponCode="ROBERTO10".
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+SDK/Sandbox
 
-## Deploy on Vercel
+Vai su http://localhost:3000/api/c/ABCD per generare un clickId e farti appendere ci/cr/ck alla sandbox.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Nella sandbox clicca add_to_cart, begin_checkout, purchase. Lo script chiama /api/track con sendBeacon.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Aggregazione
+
+Apri http://localhost:3000/api/cron/aggregate per calcolare la giornata corrente; il job fa upsert su campaignMetricsDaily.
+
+Dashboard
+
+Vai su http://localhost:3000/dashboard?campaignId=cmp-demo-1 e verifica KPI, chart e tabella. Filtra creatorId se vuoi il drill-down per creator.

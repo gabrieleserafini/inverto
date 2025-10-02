@@ -1,0 +1,5 @@
+{"_type":"campaign","campaignId":"cmp-demo-1","name":"Campagna Demo"}
+{"_type":"creator","creatorId":"cr-roberto","handle":"@roberto","name":"Roberto"}
+{"_type":"creator","creatorId":"cr-marta","handle":"@marta","name":"Marta"}
+{"_type":"campaignCreatorLink","campaignId":"cmp-demo-1","creatorId":"cr-roberto","landingUrl":"https://example.com","shortCode":"ABCD","couponCode":"ROBERTO10","utmContent":"cr-roberto"}
+{"_type":"campaignCreatorLink","campaignId":"cmp-demo-1","creatorId":"cr-marta","landingUrl":"https://example.com","shortCode":"EFGH","couponCode":"MARTA10","utmContent":"cr-marta"}
