@@ -1,3 +1,4 @@
+// app/dashboard/page.tsx
 import { getDailyMetrics } from '@/lib/server/metrics';
 import Dashboard from './Dashboard';
 
@@ -12,10 +13,11 @@ function first(v: string | string[] | undefined): string | undefined {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: RawSearchParams;
+  searchParams: Promise<RawSearchParams>;
 }) {
-  const campaignId = first(searchParams.campaignId);
-  const creatorId = first(searchParams.creatorId);
+  const sp = await searchParams;            
+  const campaignId = first(sp.campaignId);
+  const creatorId = first(sp.creatorId);
 
   const data = await getDailyMetrics(campaignId, creatorId);
 
