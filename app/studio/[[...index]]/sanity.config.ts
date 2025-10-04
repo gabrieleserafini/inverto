@@ -8,6 +8,8 @@ import campaignCreatorLink from '@/lib/sanity/schemas/campaignCreatorLink'
 import click from '@/lib/sanity/schemas/click'
 import trackingEvent from '@/lib/sanity/schemas/trackingEvent'
 import campaignMetricsDaily from '@/lib/sanity/schemas/campaignMetricsDaily'
+import shopifyWebhookLog from '@/lib/sanity/schemas/shopifyWebhookLog'
+import shopifyOrderAttribution from '@/lib/sanity/schemas/shopifyOrderAttribution'
 
 export default defineConfig({
   name: 'default',
@@ -27,6 +29,8 @@ export default defineConfig({
       click,
       trackingEvent,
       campaignMetricsDaily,
+      shopifyWebhookLog,
+      shopifyOrderAttribution,
     ],
   },
 })
