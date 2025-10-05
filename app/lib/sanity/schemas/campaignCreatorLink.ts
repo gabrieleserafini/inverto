@@ -10,6 +10,7 @@ const campaignCreatorLink = {
     { name: "landingUrl", type: "url" },
     { name: "shortCode", type: "string" },
     { name: "couponCode", type: "string" },
+    { name: 'createdAt', type: 'datetime' },
     { name: "utmContent", type: "string" },
   ],
 };
