@@ -61,6 +61,8 @@ type CreateLinkResponse =
   | { ok: true; linkId: string; couponCode: string; landingUrl: string; short: string }
   | { ok: false; error?: string; userErrors?: { message: string }[] };
 
+type MeResponse = { ok: true; shop: string } | { ok: false; error: string };
+
 // ---------- helpers ----------
 const fmt = (n?: number, d = 2) =>
   n == null || Number.isNaN(n) ? '—' : new Intl.NumberFormat('it-IT', { maximumFractionDigits: d }).format(n);
@@ -83,7 +85,6 @@ function errorMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// ---- KPI (uguale stile dashboard) ----
 function KPI({
   title, value, icon, spark, deltaPct,
 }: {
@@ -181,6 +182,9 @@ export default function Panel() {
   const k: KPIs = perfResp?.kpis ?? null;
   const topProducts: TopProduct[] = perfResp?.topProducts ?? [];
 
+  const { data: me } = useSWR<MeResponse>('/api/shopify/me', fetcher, { shouldRetryOnError: false });
+  const shopFromSession = me && 'ok' in me && me.ok ? me.shop : '';
+
   // KPI derivati
   const sparkWindow = 14;
   const sparkRevenue = series.slice(-sparkWindow).map((d) => d.revenue ?? 0);
@@ -205,18 +209,27 @@ export default function Panel() {
   const notify = (msg: string, severity: 'success' | 'error' = 'success') => setSnack({ open: true, msg, severity });
 
   const onConnect = async () => {
-    try {
-      const r = await fetch(API.connect, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(connectForm),
-      });
-      const data: ConnectResponse = await r.json();
-      if (data.ok) {
-        setConnectForm({ campaignId: '', shop: '', defaultLanding: '' });
-        refetchCampaigns();
-        notify('Campagna abilitata');
-      } else notify(JSON.stringify(data), 'error');
-    } catch (e: unknown) { notify(errorMsg(e), 'error'); }
+        try {
+            const payload = {
+            campaignId: connectForm.campaignId.trim(),
+            ...(shopFromSession ? {} : connectForm.shop ? { shop: connectForm.shop.trim() } : {}),
+            defaultLanding: connectForm.defaultLanding?.trim() || undefined,
+            };
+            const r = await fetch(API.connect, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+            });
+            const data: ConnectResponse = await r.json();
+            if (data.ok) {
+            setConnectForm({ campaignId: '', shop: '', defaultLanding: '' });
+            refetchCampaigns();
+            notify('Campagna abilitata');
+            } else {
+            notify(JSON.stringify(data), 'error');
+            }
+        } catch (e: unknown) {
+            notify(errorMsg(e), 'error');
+        }
   };
 
   const onAddCreator = async () => {
@@ -353,12 +366,17 @@ export default function Panel() {
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.12)' }} />
                 <Typography variant="subtitle1" sx={{ color: '#fff', mb: 1 }}>Collega/abilita campagna</Typography>
                 <TextField
-                  label="Campaign ID"
-                  size="small"
-                  value={connectForm.campaignId}
-                  onChange={(e) => setConnectForm((v) => ({ ...v, campaignId: e.target.value }))}
-                  sx={{ mb: 1 }}
-                  fullWidth
+                    label="Campaign ID"
+                    size="small"
+                    value={connectForm.campaignId}
+                    onChange={(e) => setConnectForm((v) => ({ ...v, campaignId: e.target.value }))}
+                    sx={{
+                        mb: 1,
+                        '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
+                        '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                    }}
+                    fullWidth
                 />
                 <TextField
                   label="Shop (myshopify.com)"
@@ -367,6 +385,21 @@ export default function Panel() {
                   onChange={(e) => setConnectForm((v) => ({ ...v, shop: e.target.value }))}
                   sx={{ mb: 1 }}
                   fullWidth
+                />
+                <TextField
+                    label="Shop (myshopify.com)"
+                    size="small"
+                    value={shopFromSession || connectForm.shop}
+                    onChange={(e) => setConnectForm((v) => ({ ...v, shop: e.target.value }))}
+                    helperText={shopFromSession ? 'Rilevato dalla sessione Shopify' : 'Puoi inserirlo come fallback'}
+                    sx={{
+                        mb: 1,
+                        '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
+                        '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
+                        '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.6)' },
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                    }}
+                    fullWidth
                 />
                 <TextField
                   label="Default landing (opz.)"
