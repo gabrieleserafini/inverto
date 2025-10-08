@@ -69,8 +69,8 @@ const fmt = (n?: number, d = 2) =>
   n == null || Number.isNaN(n) ? '—' : new Intl.NumberFormat('it-IT', { maximumFractionDigits: d }).format(n);
 
 const API = {
-  campaigns: '/api/shopify/panel/campaigns',                
-  connect: '/api/shopify/panel/campaigns',                   
+  campaigns: '/api/shopify/panel/campaigns',                 
+  connect: '/api/shopify/panel/campaigns',                  
   perf: (id: string) => `/api/shopify/panel/campaigns/${id}/performance`,
   addCreator: '/api/shopify/panel/creators/add',
   createLink: '/api/shopify/panel/links/create',
@@ -90,6 +90,15 @@ async function fetcher<T>(u: string): Promise<T> {
 function errorMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+const textFieldSx = {
+  mb: 1,
+  '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
+  '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
+  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+  '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.6)' },
+  '& input::placeholder': { color: 'rgba(255,255,255,0.6)' },
+} as const;
 
 function KPI({
   title, value, icon, spark, deltaPct,
@@ -339,13 +348,14 @@ export default function Panel() {
             }}>
               <CardContent>
                 <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>Campagne abilitate</Typography>
+
                 <TextField
                   placeholder="Cerca per nome, shop o ID…"
                   size="small"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   fullWidth
-                  sx={{ mb: 1, input: { color: 'white' } }}
+                  sx={textFieldSx}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -354,6 +364,7 @@ export default function Panel() {
                     ),
                   }}
                 />
+
                 <List dense sx={{ maxHeight: 280, overflow: 'auto' }}>
                   {filteredCampaigns.map((c) => (
                     <ListItemButton
@@ -377,42 +388,35 @@ export default function Panel() {
 
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.12)' }} />
                 <Typography variant="subtitle1" sx={{ color: '#fff', mb: 1 }}>Collega/abilita campagna</Typography>
+
                 <TextField
                   label="Campaign ID"
                   size="small"
                   value={connectForm.campaignId}
                   onChange={(e) => setConnectForm((v) => ({ ...v, campaignId: e.target.value }))}
-                  sx={{
-                    mb: 1,
-                    '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
-                    '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
-                  }}
+                  sx={textFieldSx}
                   fullWidth
                 />
+
                 <TextField
                   label="Shop (myshopify.com)"
                   size="small"
                   value={shopFromSession || connectForm.shop}
                   onChange={(e) => setConnectForm((v) => ({ ...v, shop: e.target.value }))}
                   helperText={shopFromSession ? 'Rilevato dalla sessione Shopify' : 'Puoi inserirlo come fallback'}
-                  sx={{
-                    mb: 1,
-                    '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
-                    '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
-                    '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.6)' },
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
-                  }}
+                  sx={textFieldSx}
                   fullWidth
                 />
+
                 <TextField
                   label="Default landing (opz.)"
                   size="small"
                   value={connectForm.defaultLanding}
                   onChange={(e) => setConnectForm((v) => ({ ...v, defaultLanding: e.target.value }))}
-                  sx={{ mb: 1 }}
+                  sx={textFieldSx}
                   fullWidth
                 />
+
                 <Button variant="contained" startIcon={<AddIcon />} onClick={onConnect}>
                   Abilita
                 </Button>
@@ -556,7 +560,7 @@ export default function Panel() {
                           size="small"
                           value={creatorForm.creatorId}
                           onChange={(e) => setCreatorForm({ creatorId: e.target.value })}
-                          sx={{ mb: 1 }} fullWidth
+                          sx={textFieldSx} fullWidth
                         />
                         <Button variant="outlined" startIcon={<AddIcon />} onClick={onAddCreator}>
                           Aggiungi creator
@@ -581,14 +585,14 @@ export default function Panel() {
                           size="small"
                           value={linkForm.linkId}
                           onChange={(e) => setLinkForm((v) => ({ ...v, linkId: e.target.value }))}
-                          sx={{ mb: 1 }} fullWidth
+                          sx={textFieldSx} fullWidth
                         />
                         <TextField
                           label="Coupon code"
                           size="small"
                           value={linkForm.code}
                           onChange={(e) => setLinkForm((v) => ({ ...v, code: e.target.value }))}
-                          sx={{ mb: 1 }} fullWidth
+                          sx={textFieldSx} fullWidth
                         />
                         <TextField
                           label="Sconto %"
@@ -596,14 +600,14 @@ export default function Panel() {
                           size="small"
                           value={linkForm.percentage}
                           onChange={(e) => setLinkForm((v) => ({ ...v, percentage: Number(e.target.value) }))}
-                          sx={{ mb: 1 }} fullWidth
+                          sx={textFieldSx} fullWidth
                         />
                         <TextField
                           label="Redirect path (es. /collections/all)"
                           size="small"
                           value={linkForm.redirectPath}
                           onChange={(e) => setLinkForm((v) => ({ ...v, redirectPath: e.target.value }))}
-                          sx={{ mb: 1 }} fullWidth
+                          sx={textFieldSx} fullWidth
                         />
                         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                           <Button variant="contained" startIcon={<LinkIcon />} onClick={onCreateLink}>
