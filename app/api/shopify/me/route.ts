@@ -7,8 +7,6 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const session = await getAdminSession().catch(() => null);
-  if (!session?.shop) {
-    return NextResponse.json({ ok: false, error: 'no_session' }, { status: 401 });
-  }
-  return NextResponse.json({ ok: true, shop: session.shop }, { status: 200 });
+  if (!session?.shop) return NextResponse.json({ ok: false, error: 'shop_not_available' }, { status: 400 });
+  return NextResponse.json({ ok: true, shop: session.shop });
 }

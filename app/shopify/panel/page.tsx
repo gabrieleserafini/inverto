@@ -2,11 +2,12 @@
 
 import useSWR from 'swr';
 import type React from 'react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   Box, Container, Card, CardContent, Typography, Button,
   TextField, List, ListItemButton, ListItemText, Divider, Chip,
-  IconButton, Tooltip, Snackbar, Alert, InputAdornment, Grid
+  IconButton, Tooltip, Snackbar, Alert, InputAdornment, Grid, Tabs, Tab,
+  MenuItem, Checkbox, FormControlLabel, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper
 } from '@mui/material';
 
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -19,6 +20,10 @@ import PercentIcon from '@mui/icons-material/Percent';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SearchIcon from '@mui/icons-material/Search';
 import DownloadIcon from '@mui/icons-material/Download';
+import DeleteIcon from '@mui/icons-material/Delete';
+import ToggleOnIcon from '@mui/icons-material/ToggleOn';
+import ToggleOffIcon from '@mui/icons-material/ToggleOff';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 import {
   ResponsiveContainer,
@@ -29,7 +34,11 @@ import {
 
 import type { DailyPoint } from '@/lib/server/metrics';
 
-type Campaign = { _id: string; campaignId: string; name?: string; shop?: string; defaultLanding?: string };
+// ---------------- Types ----------------
+type Campaign = {
+  _id: string; campaignId: string; name?: string; shop?: string;
+  defaultLanding?: string; enabled?: boolean;
+};
 type CampaignsResponse = { items: Campaign[] };
 
 type KPIs = {
@@ -49,31 +58,70 @@ type PerformanceResponse = {
   topProducts: TopProduct[];
 };
 
-type ConnectBody = { campaignId: string; shop: string; defaultLanding?: string };
-type ConnectResponse = { ok: true; campaign: unknown } | { ok: false; error: string };
-
-type AddCreatorBody = { campaignId: string; creatorId: string };
-type AddCreatorResponse = { ok: true; linkId: string } | { ok: false; error: string };
-
-type CreateLinkBody = {
-  campaignId: string; creatorId: string; linkId: string; code: string; percentage: number; redirectPath?: string;
-};
-type CreateLinkResponse =
-  | { ok: true; linkId: string; couponCode: string; landingUrl: string; short: string }
-  | { ok: false; error?: string; userErrors?: { message: string }[] };
-
 type MeResponse = { ok: true; shop: string } | { ok: false; error: string };
 
-// ---------- helpers ----------
+type CreatorsListResponse = {
+  ok: true;
+  creators: { _id: string; creatorId: string; creatorName?: string }[];
+};
+
+type CreatorPerfResponse = PerformanceResponse;
+
+// Risposte "ok | error" comuni
+type ErrResp = { ok: false; error?: string; userErrors?: { message: string }[] };
+
+// Link
+type CreateLinkOk = { ok: true; linkId: string; short: string };
+type CreateLinkErr = ErrResp;
+type CreateLinkResponse = CreateLinkOk | CreateLinkErr;
+
+// Coupon
+type CouponOk = { ok: true; couponCode: string; status: string };
+type CouponErr = ErrResp;
+type CouponResponse = CouponOk | CouponErr;
+
+// payload che va all'API coupon
+type CouponPayload = {
+  title: string;
+  code: string;
+  type: 'PERCENT' | 'AMOUNT';
+  percentage?: number;
+  amount?: number;
+  currencyCode?: string;
+  startsAt: string;  // ISO
+  endsAt?: string;   // ISO
+  usageLimit?: number;
+  appliesOncePerCustomer?: boolean;
+  combinesWithOrder?: boolean;
+  combinesWithProduct?: boolean;
+  combinesWithShipping?: boolean;
+  customerSegmentId?: string;
+  minSubtotal?: number;
+  minQty?: number;
+  productIds?: string[];
+  collectionIds?: string[];
+};
+
+// estensione per i campi raw dell'UI coupon
+type CouponFormUI = CouponPayload & {
+  productIdsRaw: string;
+  collectionIdsRaw: string;
+};
+
+// -------------- Helpers ----------------
 const fmt = (n?: number, d = 2) =>
   n == null || Number.isNaN(n) ? '—' : new Intl.NumberFormat('it-IT', { maximumFractionDigits: d }).format(n);
 
 const API = {
-  campaigns: '/api/shopify/panel/campaigns',                 
-  connect: '/api/shopify/panel/campaigns',                  
+  campaigns: '/api/shopify/panel/campaigns', // GET list, POST connect
+  campaign: (id: string) => `/api/shopify/panel/campaigns/${id}`, // GET|PATCH|DELETE
   perf: (id: string) => `/api/shopify/panel/campaigns/${id}/performance`,
-  addCreator: '/api/shopify/panel/creators/add',
-  createLink: '/api/shopify/panel/links/create',
+  creators: (id: string) => `/api/shopify/panel/campaigns/${id}/creators`,
+  creatorPerf: (id: string, creatorId: string) => `/api/shopify/panel/campaigns/${id}/creators/${creatorId}/performance`,
+  linksGlobal: (id: string) => `/api/shopify/panel/campaigns/${id}/links`,
+  linksCreator: (id: string, creatorId: string) => `/api/shopify/panel/campaigns/${id}/creators/${creatorId}/links`,
+  couponsCreate: '/api/shopify/panel/coupons/create',
+  me: '/api/shopify/me',
 };
 
 async function fetcher<T>(u: string): Promise<T> {
@@ -81,7 +129,7 @@ async function fetcher<T>(u: string): Promise<T> {
   const text = await r.text();
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
-    try { const j = JSON.parse(text); msg = j?.error || msg; } catch {}
+    try { const j = JSON.parse(text); msg = (j?.error || j?.message) ?? msg; } catch {}
     throw new Error(msg);
   }
   return text ? (JSON.parse(text) as T) : ({} as T);
@@ -91,6 +139,26 @@ function errorMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+
+const hasKey = (obj: unknown, key: string): obj is Record<string, unknown> =>
+  typeof obj === 'object' && obj !== null && key in obj;
+
+const isErrResp = (r: unknown): r is ErrResp => {
+  if (!hasKey(r, 'ok')) return false;
+  const ok = r.ok;
+  return ok === false;
+};
+
+const apiError = (r: unknown): string => {
+  if (isErrResp(r)) {
+    if (typeof r.error === 'string' && r.error) return r.error;
+    const ue = r.userErrors;
+    if (Array.isArray(ue) && ue.length && typeof ue[0]?.message === 'string') return ue[0].message;
+  }
+  return 'Operazione non riuscita';
+};
+
+// Stile uniforme input su dark
 const textFieldSx = {
   mb: 1,
   '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
@@ -164,8 +232,9 @@ function KPI({
   );
 }
 
-// ---- main page ----
+// --------- Main Panel ---------
 export default function Panel() {
+  // Campaigns
   const { data: campaignsResp, mutate: refetchCampaigns, isLoading: loadingCampaigns } =
     useSWR<CampaignsResponse>(API.campaigns, fetcher);
 
@@ -174,7 +243,7 @@ export default function Panel() {
     [campaignsResp]
   );
 
-  // Ricerca
+  // Search
   const [search, setSearch] = useState('');
   const filteredCampaigns = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -186,10 +255,13 @@ export default function Panel() {
     );
   }, [campaigns, search]);
 
-  // selezione
-  const [selected, setSelected] = useState<{ _id: string; name?: string } | null>(null);
+  // Selection
+  const [selected, setSelected] = useState<Campaign | null>(null);
 
-  // Performance campagna selezionata
+  // Tabs
+  const [tab, setTab] = useState<'overview' | 'creator'>('overview');
+
+  // Performance (global)
   const { data: perfResp, mutate: refetchPerf } = useSWR<PerformanceResponse>(
     selected ? API.perf(selected._id) : null,
     fetcher
@@ -198,10 +270,7 @@ export default function Panel() {
   const k: KPIs = perfResp?.kpis ?? null;
   const topProducts: TopProduct[] = perfResp?.topProducts ?? [];
 
-  const { data: me } = useSWR<MeResponse>('/api/shopify/me', fetcher, { shouldRetryOnError: false });
-  const shopFromSession = me && 'ok' in me && me.ok ? me.shop : '';
-
-  // KPI derivati
+  // Derived KPI deltas
   const sparkWindow = 14;
   const sparkRevenue = series.slice(-sparkWindow).map((d) => d.revenue ?? 0);
   const sparkPurchases = series.slice(-sparkWindow).map((d) => d.purchases ?? 0);
@@ -211,86 +280,194 @@ export default function Panel() {
   const deltaPurchases = k && prev ? (k.purchases - (prev.purchases ?? 0)) / Math.max(prev.purchases ?? 0, 1) : null;
   const deltaCVR = k && prev ? ((k.cvr ?? 0) - (prev.cvr ?? 0)) / Math.max(prev.cvr ?? 0, 0.00001) : null;
 
-  // Forms
-  const [connectForm, setConnectForm] = useState<ConnectBody>({ campaignId: '', shop: '', defaultLanding: '' });
-  const [creatorForm, setCreatorForm] = useState<{ creatorId: string }>({ creatorId: '' });
-  const [linkForm, setLinkForm] = useState<{ linkId: string; code: string; percentage: number; redirectPath: string }>(
-    { linkId: '', code: '', percentage: 10, redirectPath: '' }
+  // Creators list for selected campaign
+  const { data: creatorsResp, mutate: refetchCreators } = useSWR<CreatorsListResponse>(
+    selected ? API.creators(selected._id) : null,
+    fetcher
   );
+  const creators = useMemo(() => creatorsResp?.creators ?? [], [creatorsResp]);
 
-  // Notifiche
+  // Creator detail selection
+  const [selectedCreatorId, setSelectedCreatorId] = useState<string>('');
+  useEffect(() => {
+    if (tab === 'creator' && !selectedCreatorId && creators.length) {
+      setSelectedCreatorId(creators[0].creatorId);
+    }
+  }, [tab, creators, selectedCreatorId]);
+
+  // Creator performance
+  const { data: creatorPerfResp, mutate: refetchCreatorPerf } = useSWR<CreatorPerfResponse>(
+    selected && selectedCreatorId ? API.creatorPerf(selected._id, selectedCreatorId) : null,
+    fetcher
+  );
+  const cSeries: DailyPoint[] = creatorPerfResp?.series ?? [];
+  const ck: KPIs = creatorPerfResp?.kpis ?? null;
+
+  // Leaderboard: carica KPI per ciascun creator (naive, ok per N limitato)
+  const [leader, setLeader] = useState<Record<string, KPIs>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!selected) return;
+      const entries = await Promise.all(creators.map(async (cr) => {
+        try {
+          const r = await fetch(API.creatorPerf(selected._id, cr.creatorId));
+          const j: CreatorPerfResponse = await r.json();
+          return [cr.creatorId, (j?.kpis ?? null)] as const;
+        } catch { return [cr.creatorId, null] as const; }
+      }));
+      if (!cancelled) {
+        const obj: Record<string, KPIs> = {};
+        for (const [id, kpi] of entries) obj[id] = kpi;
+        setLeader(obj);
+      }
+    }
+    if (selected && creators.length) load();
+    return () => { cancelled = true; };
+  }, [selected?._id, creators]);
+
+  // Forms
+  const [connectForm, setConnectForm] = useState<{ campaignId: string; shop: string; defaultLanding: string }>({
+    campaignId: '', shop: '', defaultLanding: ''
+  });
+
+  const [globalLinkForm, setGlobalLinkForm] = useState<{ redirectPath: string }>({
+    redirectPath: '/collections/all'
+  });
+
+  const [creatorLinkForm, setCreatorLinkForm] = useState<{ redirectPath: string }>({
+    redirectPath: '/collections/all'
+  });
+
+  const [couponForm, setCouponForm] = useState<CouponFormUI>({
+    title: '',
+    code: '',
+    type: 'PERCENT',
+    percentage: 10,
+    amount: undefined,
+    currencyCode: 'EUR',
+    startsAt: new Date().toISOString(),
+    endsAt: '',
+    usageLimit: undefined,
+    appliesOncePerCustomer: false,
+    combinesWithOrder: true,
+    combinesWithProduct: true,
+    combinesWithShipping: false,
+    customerSegmentId: '',
+    minSubtotal: undefined,
+    minQty: undefined,
+    productIds: [],
+    collectionIds: [],
+    productIdsRaw: '',
+    collectionIdsRaw: '',
+  });
+
+  // Notifications
   const [snack, setSnack] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false, msg: '', severity: 'success'
   });
   const notify = (msg: string, severity: 'success' | 'error' = 'success') => setSnack({ open: true, msg, severity });
 
+  // Actions: connect campaign (legacy)
   const onConnect = async () => {
     try {
       const payload = {
         campaignId: connectForm.campaignId.trim(),
-        ...(shopFromSession
-          ? {}
-          : connectForm.shop
-          ? { shop: connectForm.shop.trim() }
-          : {}),
+        ...(connectForm.shop ? { shop: connectForm.shop.trim() } : {}),
         defaultLanding: connectForm.defaultLanding?.trim() || undefined,
       };
-      const r = await fetch(API.connect, {
+      const r = await fetch(API.campaigns, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data: ConnectResponse = await r.json();
-      if (data.ok) {
-        setConnectForm({ campaignId: '', shop: '', defaultLanding: '' });
-        await refetchCampaigns();
-        notify('Campagna abilitata');
-      } else {
-        const err = 'error' in data ? data.error : 'Operazione non riuscita';
-        notify(err, 'error');
-      }
-    } catch (e: unknown) {
+      const data: { ok: true } | ErrResp = await r.json();
+      if (!r.ok || apiError(data)) return notify(apiError(data), 'error');
+
+      setConnectForm({ campaignId: '', shop: '', defaultLanding: '' });
+      await refetchCampaigns();
+      notify('Campagna abilitata');
+    } catch (e) {
       notify(errorMsg(e), 'error');
     }
   };
 
-  const onAddCreator = async () => {
-    if (!selected) return notify('Seleziona una campagna', 'error');
+  const toggleCampaign = async (c: Campaign) => {
     try {
-      const r = await fetch(API.addCreator, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ campaignId: selected._id, creatorId: creatorForm.creatorId } satisfies AddCreatorBody),
+      const r = await fetch(API.campaign(c._id), {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: !c.enabled }),
       });
-      const data: AddCreatorResponse = await r.json();
-      if (data.ok) {
-        setCreatorForm({ creatorId: '' });
-        notify('Creator aggiunto. Link: ' + data.linkId);
-      } else notify(JSON.stringify(data), 'error');
-    } catch (e: unknown) { notify(errorMsg(e), 'error'); }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await refetchCampaigns();
+      if (selected && selected._id === c._id) {
+        setSelected({ ...c, enabled: !c.enabled });
+      }
+    } catch (e) { notify(errorMsg(e), 'error'); }
   };
 
-  const onCreateLink = async () => {
+  const removeCampaign = async (c: Campaign) => {
+    try {
+      const r = await fetch(API.campaign(c._id), { method: 'DELETE' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await refetchCampaigns();
+      if (selected && selected._id === c._id) setSelected(null);
+    } catch (e) { notify(errorMsg(e), 'error'); }
+  };
+
+  const createGlobalLink = async () => {
     if (!selected) return notify('Seleziona una campagna', 'error');
     try {
-      const body: CreateLinkBody = {
-        campaignId: selected._id,
-        creatorId: creatorForm.creatorId || 'unknown',
-        linkId: linkForm.linkId,
-        code: linkForm.code,
-        percentage: Number(linkForm.percentage),
-        redirectPath: linkForm.redirectPath || '/collections/all',
-      };
-      const r = await fetch(API.createLink, {
+      const r = await fetch(API.linksGlobal(selected._id), {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ redirectPath: globalLinkForm.redirectPath }),
       });
       const data: CreateLinkResponse = await r.json();
-      if (data.ok) {
-        notify(`Creato coupon ${data.couponCode}. Short: ${data.short}`);
-        setLinkForm({ linkId: '', code: '', percentage: 10, redirectPath: '' });
-        await refetchPerf();
-      } else notify(JSON.stringify(data), 'error');
-    } catch (e: unknown) { notify(errorMsg(e), 'error'); }
+      if (!r.ok || apiError(data)) return notify(apiError(data), 'error');
+      notify(`Link globale creato`);
+    } catch (e) { notify(errorMsg(e), 'error'); }
   };
+
+  const createCreatorLink = async () => {
+    if (!selected) return notify('Seleziona una campagna', 'error');
+    if (!selectedCreatorId) return notify('Seleziona un creator', 'error');
+    try {
+      const r = await fetch(API.linksCreator(selected._id, selectedCreatorId), {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ redirectPath: creatorLinkForm.redirectPath }),
+      });
+      const data: CreateLinkResponse = await r.json();
+      if (!r.ok || apiError(data)) return notify(apiError(data), 'error');
+      notify(`Link creator creato`);
+    } catch (e) { notify(errorMsg(e), 'error'); }
+  };
+
+const createCoupon = async () => {
+  try {
+    const payload: CouponPayload = {
+      ...couponForm,
+      productIds: couponForm.productIdsRaw.split(',').map(s => s.trim()).filter(Boolean),
+      collectionIds: couponForm.collectionIdsRaw.split(',').map(s => s.trim()).filter(Boolean),
+      endsAt: couponForm.endsAt?.trim() ? couponForm.endsAt : undefined,
+    };
+    if (payload.type === 'PERCENT') delete payload.amount;
+    else delete payload.percentage;
+
+    const r = await fetch(API.couponsCreate, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data: CouponResponse = await r.json();
+
+    if (!r.ok || isErrResp(data)) {
+      return notify(apiError(data), 'error');
+    }
+
+    notify(`Coupon ${data.couponCode} creato · stato: ${data.status}`);
+  } catch (e) {
+    notify(errorMsg(e), 'error');
+  }
+};
 
   const exportCsv = () => {
     const header = ['date', 'pageViews', 'addToCart', 'beginCheckout', 'purchases', 'revenue', 'cvr', 'abandonRate', 'aov'];
@@ -339,7 +516,7 @@ export default function Panel() {
         </Box>
 
         <Grid container spacing={2}>
-          {/* Lista campagne + Connect */}
+          {/* Sidebar: campaigns list + connect */}
           <Grid size={{ xs: 12, md: 4 }}>
             <Card sx={{
               borderRadius: 3, borderColor: 'rgba(255,255,255,0.08)',
@@ -365,18 +542,34 @@ export default function Panel() {
                   }}
                 />
 
-                <List dense sx={{ maxHeight: 280, overflow: 'auto' }}>
+                <List dense sx={{ maxHeight: 320, overflow: 'auto' }}>
                   {filteredCampaigns.map((c) => (
                     <ListItemButton
                       key={c._id}
                       selected={selected?._id === c._id}
-                      onClick={() => setSelected({ _id: c._id, name: c.name })}
+                      onClick={() => { setSelected(c); setTab('overview'); }}
                       sx={{ borderRadius: 2 }}
                     >
                       <ListItemText
                         primary={<span style={{ color: '#fff' }}>{c.name || '—'}</span>}
                         secondary={<span style={{ color: 'rgba(255,255,255,0.7)' }}>{c.shop || '—'}</span>}
                       />
+                      <Chip
+                        label={c.enabled ? 'On' : 'Off'}
+                        color={c.enabled ? 'success' : 'default'}
+                        size="small"
+                        sx={{ mr: 1 }}
+                      />
+                      <Tooltip title={c.enabled ? 'Disabilita' : 'Abilita'}>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); toggleCampaign(c); }} sx={{ color: 'rgba(255,255,255,0.85)' }}>
+                          {c.enabled ? <ToggleOffIcon /> : <ToggleOnIcon />}
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Rimuovi dallo store">
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); removeCampaign(c); }} sx={{ color: '#ff8a80' }}>
+                          <DeleteIcon />
+                        </IconButton>
+                      </Tooltip>
                     </ListItemButton>
                   ))}
                   {!loadingCampaigns && filteredCampaigns.length === 0 && (
@@ -397,17 +590,15 @@ export default function Panel() {
                   sx={textFieldSx}
                   fullWidth
                 />
-
                 <TextField
                   label="Shop (myshopify.com)"
                   size="small"
-                  value={shopFromSession || connectForm.shop}
+                  value={connectForm.shop}
                   onChange={(e) => setConnectForm((v) => ({ ...v, shop: e.target.value }))}
-                  helperText={shopFromSession ? 'Rilevato dalla sessione Shopify' : 'Puoi inserirlo come fallback'}
+                  helperText="Inserisci lo shop se la sessione non lo rileva"
                   sx={textFieldSx}
                   fullWidth
                 />
-
                 <TextField
                   label="Default landing (opz.)"
                   size="small"
@@ -416,7 +607,6 @@ export default function Panel() {
                   sx={textFieldSx}
                   fullWidth
                 />
-
                 <Button variant="contained" startIcon={<AddIcon />} onClick={onConnect}>
                   Abilita
                 </Button>
@@ -424,7 +614,7 @@ export default function Panel() {
             </Card>
           </Grid>
 
-          {/* Dettaglio campagna */}
+          {/* Right pane */}
           <Grid size={{ xs: 12, md: 8 }}>
             {!selected ? (
               <Card sx={{
@@ -438,187 +628,347 @@ export default function Panel() {
               </Card>
             ) : (
               <>
-                {/* KPI Row */}
-                <Grid container spacing={2} sx={{ mb: 1 }}>
-                  {[
-                    { title: 'Revenue', value: `€ ${fmt(k?.revenue)}`, icon: <MonetizationOnIcon fontSize="small" />, spark: sparkRevenue, delta: deltaRevenue },
-                    { title: 'Acquisti', value: fmt(k?.purchases, 0), icon: <ShoppingBagIcon fontSize="small" />, spark: sparkPurchases, delta: deltaPurchases },
-                    { title: 'CVR', value: k ? `${fmt((k.cvr || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" />, spark: sparkCVR, delta: deltaCVR },
-                    { title: 'AOV', value: `€ ${fmt(k?.aov)}`, icon: <TrendingUpIcon fontSize="small" /> },
-                    { title: 'Abbandono', value: k ? `${fmt((k.abandonRate || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" /> },
-                  ].map((it) => (
-                    <Grid key={it.title} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                      <KPI title={it.title} value={it.value} icon={it.icon} spark={it.spark} deltaPct={it.delta ?? undefined} />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Typography variant="h6" sx={{ color: '#fff', flex: 1 }}>
+                    {selected.name || selected.campaignId} · {selected.shop}
+                  </Typography>
+                  <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ minHeight: 36, height: 36 }}>
+                    <Tab value="overview" label="Overview" sx={{ minHeight: 36, height: 36 }} />
+                    <Tab value="creator" label="Creator" sx={{ minHeight: 36, height: 36 }} />
+                  </Tabs>
+                </Box>
+
+                {tab === 'overview' ? (
+                  <>
+                    {/* KPI Row */}
+                    <Grid container spacing={2} sx={{ mb: 1 }}>
+                      {[
+                        { title: 'Revenue', value: `€ ${fmt(k?.revenue)}`, icon: <MonetizationOnIcon fontSize="small" />, spark: sparkRevenue, delta: deltaRevenue },
+                        { title: 'Acquisti', value: fmt(k?.purchases, 0), icon: <ShoppingBagIcon fontSize="small" />, spark: sparkPurchases, delta: deltaPurchases },
+                        { title: 'CVR', value: k ? `${fmt((k.cvr || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" />, spark: sparkCVR, delta: deltaCVR },
+                        { title: 'AOV', value: `€ ${fmt(k?.aov)}`, icon: <TrendingUpIcon fontSize="small" /> },
+                        { title: 'Abbandono', value: k ? `${fmt((k.abandonRate || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" /> },
+                      ].map((it) => (
+                        <Grid key={it.title} size={{ xs: 12, sm: 6, md: 4 }}>
+                          <KPI title={it.title} value={it.value} icon={it.icon} spark={it.spark} deltaPct={it.delta ?? undefined} />
+                        </Grid>
+                      ))}
                     </Grid>
-                  ))}
-                </Grid>
 
-                {/* Charts */}
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 12, md: 7 }}>
-                    <Card sx={{
-                      borderRadius: 3,
-                      borderColor: 'rgba(255,255,255,0.08)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
-                      backdropFilter: 'blur(8px)',
-                    }}>
-                      <CardContent>
-                        <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                          Revenue & Acquisti (doppio asse)
-                        </Typography>
-                        <Box sx={{ width: '100%', height: 320 }}>
-                          <ResponsiveContainer>
-                            <LineChart data={series}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                              <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
-                              <YAxis yAxisId="left" stroke="rgba(255,255,255,0.7)" />
-                              <YAxis yAxisId="right" orientation="right" stroke="rgba(255,255,255,0.7)" />
-                              <RTooltip contentStyle={{ backgroundColor: '#0B1020', border: '1px solid #26324d', color: '#fff' }} />
-                              <Legend wrapperStyle={{ color: '#fff' }} />
-                              <Line yAxisId="left" type="monotone" dataKey="revenue" name="Revenue €" stroke="#82B1FF" strokeWidth={2} dot={false} />
-                              <Line yAxisId="right" type="monotone" dataKey="purchases" name="Acquisti" stroke="#4FC3F7" strokeWidth={2} dot={false} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
+                    {/* Charts */}
+                    <Grid container spacing={2}>
+                      <Grid size={{ xs: 12, md: 7 }}>
+                        <Card sx={{
+                          borderRadius: 3, borderColor: 'rgba(255,255,255,0.08)',
+                          background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
+                          backdropFilter: 'blur(8px)',
+                        }}>
+                          <CardContent>
+                            <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
+                              Revenue & Acquisti (doppio asse)
+                            </Typography>
+                            <Box sx={{ width: '100%', height: 320 }}>
+                              <ResponsiveContainer>
+                                <LineChart data={series}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                                  <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
+                                  <YAxis yAxisId="left" stroke="rgba(255,255,255,0.7)" />
+                                  <YAxis yAxisId="right" orientation="right" stroke="rgba(255,255,255,0.7)" />
+                                  <RTooltip contentStyle={{ backgroundColor: '#0B1020', border: '1px solid #26324d', color: '#fff' }} />
+                                  <Legend wrapperStyle={{ color: '#fff' }} />
+                                  <Line yAxisId="left" type="monotone" dataKey="revenue" name="Revenue €" stroke="#82B1FF" strokeWidth={2} dot={false} />
+                                  <Line yAxisId="right" type="monotone" dataKey="purchases" name="Acquisti" stroke="#4FC3F7" strokeWidth={2} dot={false} />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
 
-                  <Grid size={{ xs: 12, md: 5 }}>
-                    <Card sx={{
-                      borderRadius: 3,
-                      borderColor: 'rgba(255,255,255,0.08)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
-                      backdropFilter: 'blur(8px)',
-                    }}>
-                      <CardContent>
-                        <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                          Top prodotti (qty)
-                        </Typography>
-                        {topProducts.map((p) => (
-                          <Box key={p.title} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1 }}>
-                            <Typography sx={{ color: '#fff' }}>{p.title}</Typography>
-                            <Chip label={`x${p.qty} · € ${fmt(p.revenue)}`} />
-                          </Box>
-                        ))}
-                        {topProducts.length === 0 && (
-                          <Typography sx={{ color: 'rgba(255,255,255,0.7)' }}>Nessun dato ancora</Typography>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Grid>
+                      <Grid size={{ xs: 12, md: 5 }}>
+                        <Card sx={{
+                          borderRadius: 3, borderColor: 'rgba(255,255,255,0.08)',
+                          background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
+                          backdropFilter: 'blur(8px)',
+                        }}>
+                          <CardContent>
+                            <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
+                              Top prodotti (qty)
+                            </Typography>
+                            {topProducts.map((p) => (
+                              <Box key={p.title} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1 }}>
+                                <Typography sx={{ color: '#fff' }}>{p.title}</Typography>
+                                <Chip label={`x${p.qty} · € ${fmt(p.revenue)}`} />
+                              </Box>
+                            ))}
+                            {topProducts.length === 0 && (
+                              <Typography sx={{ color: 'rgba(255,255,255,0.7)' }}>Nessun dato ancora</Typography>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
 
-                  {/* Trend area */}
-                  <Grid size={{ xs: 12 }}>
-                    <Card sx={{
-                      borderRadius: 3,
-                      borderColor: 'rgba(255,255,255,0.08)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
-                      backdropFilter: 'blur(8px)',
-                    }}>
-                      <CardContent>
-                        <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                          Trend (Revenue area)
-                        </Typography>
-                        <Box sx={{ width: '100%', height: 260 }}>
-                          <ResponsiveContainer>
-                            <AreaChart data={series}>
-                              <defs>
-                                <linearGradient id="areaRev" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor="#00E5FF" stopOpacity={0.9} />
-                                  <stop offset="100%" stopColor="#2962FF" stopOpacity={0.2} />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                              <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
-                              <YAxis stroke="rgba(255,255,255,0.7)" />
-                              <RTooltip contentStyle={{ backgroundColor: '#0B1020', border: '1px solid #26324d', color: '#fff' }} />
-                              <Area dataKey="revenue" type="monotone" fill="url(#areaRev)" stroke="#81D4FA" />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
+                    {/* Creators leaderboard + actions */}
+                    <Grid container spacing={2} sx={{ mt: 1 }}>
+                      <Grid size={{ xs: 12 }}>
+                        <Card sx={{
+                          borderRadius: 3, borderColor: 'rgba(255,255,255,0.08)',
+                          background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
+                          backdropFilter: 'blur(8px)',
+                        }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                              <Typography variant="h6" sx={{ color: '#fff', flex: 1 }}>
+                                Creators · ranking
+                              </Typography>
+                            </Box>
 
-                {/* Creator & Link */}
-                <Grid container spacing={2} sx={{ mt: 1 }}>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Card sx={{
-                      borderRadius: 3,
-                      borderColor: 'rgba(255,255,255,0.08)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
-                      backdropFilter: 'blur(8px)',
-                    }}>
-                      <CardContent>
-                        <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                          Aggiungi Creator
-                        </Typography>
-                        <TextField
-                          label="Creator ID"
-                          size="small"
-                          value={creatorForm.creatorId}
-                          onChange={(e) => setCreatorForm({ creatorId: e.target.value })}
-                          sx={textFieldSx} fullWidth
-                        />
-                        <Button variant="outlined" startIcon={<AddIcon />} onClick={onAddCreator}>
-                          Aggiungi creator
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  </Grid>
+                            <TableContainer component={Paper} sx={{ background: 'transparent', boxShadow: 'none' }}>
+                              <Table size="small">
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell sx={{ color: 'rgba(255,255,255,0.85)' }}>Creator</TableCell>
+                                    <TableCell sx={{ color: 'rgba(255,255,255,0.85)' }} align="right">Revenue</TableCell>
+                                    <TableCell sx={{ color: 'rgba(255,255,255,0.85)' }} align="right">Acquisti</TableCell>
+                                    <TableCell sx={{ color: 'rgba(255,255,255,0.85)' }} align="right">CVR</TableCell>
+                                    <TableCell sx={{ color: 'rgba(255,255,255,0.85)' }} align="right">Abbandono</TableCell>
+                                    <TableCell />
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {creators.map(cr => {
+                                    const kp = leader[cr.creatorId] || null;
+                                    return (
+                                      <TableRow key={cr._id} hover>
+                                        <TableCell sx={{ color: '#fff' }}>{cr.creatorName || cr.creatorId}</TableCell>
+                                        <TableCell align="right" sx={{ color: '#fff' }}>{kp ? `€ ${fmt(kp.revenue)}` : '—'}</TableCell>
+                                        <TableCell align="right" sx={{ color: '#fff' }}>{kp ? fmt(kp.purchases, 0) : '—'}</TableCell>
+                                        <TableCell align="right" sx={{ color: '#fff' }}>{kp ? `${fmt((kp.cvr || 0) * 100)}%` : '—'}</TableCell>
+                                        <TableCell align="right" sx={{ color: '#fff' }}>{kp ? `${fmt((kp.abandonRate || 0) * 100)}%` : '—'}</TableCell>
+                                        <TableCell align="right">
+                                          <Button
+                                            size="small"
+                                            variant="outlined"
+                                            endIcon={<ArrowForwardIcon />}
+                                            onClick={() => { setSelectedCreatorId(cr.creatorId); setTab('creator'); }}
+                                          >
+                                            Dettaglio
+                                          </Button>
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                  {creators.length === 0 && (
+                                    <TableRow><TableCell colSpan={6} sx={{ color: 'rgba(255,255,255,0.7)' }}>Nessun creator collegato</TableCell></TableRow>
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </TableContainer>
 
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <Card sx={{
-                      borderRadius: 3,
-                      borderColor: 'rgba(255,255,255,0.08)',
-                      background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
-                      backdropFilter: 'blur(8px)',
-                    }}>
-                      <CardContent>
-                        <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-                          Genera link + coupon (auto-apply)
-                        </Typography>
-                        <TextField
-                          label="Link ID (documento campaignCreatorLink)"
-                          size="small"
-                          value={linkForm.linkId}
-                          onChange={(e) => setLinkForm((v) => ({ ...v, linkId: e.target.value }))}
-                          sx={textFieldSx} fullWidth
-                        />
-                        <TextField
-                          label="Coupon code"
-                          size="small"
-                          value={linkForm.code}
-                          onChange={(e) => setLinkForm((v) => ({ ...v, code: e.target.value }))}
-                          sx={textFieldSx} fullWidth
-                        />
-                        <TextField
-                          label="Sconto %"
-                          type="number"
-                          size="small"
-                          value={linkForm.percentage}
-                          onChange={(e) => setLinkForm((v) => ({ ...v, percentage: Number(e.target.value) }))}
-                          sx={textFieldSx} fullWidth
-                        />
-                        <TextField
-                          label="Redirect path (es. /collections/all)"
-                          size="small"
-                          value={linkForm.redirectPath}
-                          onChange={(e) => setLinkForm((v) => ({ ...v, redirectPath: e.target.value }))}
-                          sx={textFieldSx} fullWidth
-                        />
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                          <Button variant="contained" startIcon={<LinkIcon />} onClick={onCreateLink}>
-                            Crea link + coupon
-                          </Button>
-                          <Chip icon={<DiscountIcon />} label="Auto-apply /discount/CODE" />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
+                            {/* Add creator */}
+                            <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
+                              <AddCreatorInline
+                                campaignId={selected._id}
+                                onAdded={() => { refetchCreators(); notify('Creator aggiunto'); }}
+                              />
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+
+                    {/* Tools: Global Link & Coupon */}
+                    <Grid container spacing={2} sx={{ mt: 1 }}>
+                      <Grid size={{ xs: 12, md: 6 }}>
+                        <Card sx={{ borderRadius: 3, background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)', backdropFilter: 'blur(8px)' }}>
+                          <CardContent>
+                            <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>Crea Link (GLOBAL)</Typography>
+                            <TextField
+                              label="Redirect path (es. /collections/all)"
+                              size="small"
+                              value={globalLinkForm.redirectPath}
+                              onChange={(e) => setGlobalLinkForm({ redirectPath: e.target.value })}
+                              sx={textFieldSx}
+                              fullWidth
+                            />
+                            <Button variant="contained" startIcon={<LinkIcon />} onClick={createGlobalLink}>
+                              Crea link globale
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+
+                      <Grid size={{ xs: 12, md: 6 }}>
+                        <Card sx={{ borderRadius: 3, background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)', backdropFilter: 'blur(8px)' }}>
+                          <CardContent>
+                            <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>Crea Coupon</Typography>
+
+                            <TextField label="Titolo" size="small" sx={textFieldSx}
+                              value={couponForm.title} onChange={(e)=>setCouponForm(v=>({...v, title:e.target.value}))} fullWidth />
+                            <TextField label="Codice" size="small" sx={textFieldSx}
+                              value={couponForm.code} onChange={(e)=>setCouponForm(v=>({...v, code:e.target.value}))} fullWidth />
+                            <TextField label="Tipo sconto" select size="small" sx={textFieldSx}
+                              value={couponForm.type} onChange={(e)=>setCouponForm(v=>({...v, type:e.target.value as 'PERCENT' | 'AMOUNT'}))} fullWidth>
+                              <MenuItem value="PERCENT">Percentuale</MenuItem>
+                              <MenuItem value="AMOUNT">Importo fisso</MenuItem>
+                            </TextField>
+                            {couponForm.type === 'PERCENT' ? (
+                              <TextField label="Percentuale %" type="number" size="small" sx={textFieldSx}
+                                value={couponForm.percentage ?? 10} onChange={(e)=>setCouponForm(v=>({...v, percentage:Number(e.target.value)}))} fullWidth />
+                            ) : (
+                              <>
+                                <TextField label="Importo" type="number" size="small" sx={textFieldSx}
+                                  value={couponForm.amount ?? 10} onChange={(e)=>setCouponForm(v=>({...v, amount:Number(e.target.value)}))} fullWidth />
+                                <TextField label="Valuta" size="small" sx={textFieldSx}
+                                  value={couponForm.currencyCode ?? 'EUR'} onChange={(e)=>setCouponForm(v=>({...v, currencyCode:e.target.value}))} fullWidth />
+                              </>
+                            )}
+                            <TextField label="Inizio (ISO)" size="small" sx={textFieldSx}
+                              value={couponForm.startsAt} onChange={(e)=>setCouponForm(v=>({...v, startsAt:e.target.value}))} fullWidth />
+                            <TextField label="Fine (ISO, opz.)" size="small" sx={textFieldSx}
+                              value={couponForm.endsAt || ''} onChange={(e)=>setCouponForm(v=>({...v, endsAt:e.target.value}))} fullWidth />
+                            <TextField label="Usage limit (opz.)" type="number" size="small" sx={textFieldSx}
+                              value={couponForm.usageLimit ?? ''} onChange={(e)=>setCouponForm(v=>({...v, usageLimit:e.target.value?Number(e.target.value):undefined}))} fullWidth />
+                            <FormControlLabel
+                              control={<Checkbox checked={!!couponForm.appliesOncePerCustomer}
+                                onChange={(e)=>setCouponForm(v=>({...v, appliesOncePerCustomer:e.target.checked}))} />}
+                              label={<span style={{color:'rgba(255,255,255,0.85)'}}>Una volta per cliente</span>}
+                            />
+                            <Typography variant="subtitle2" sx={{ color: 'rgba(255,255,255,0.9)', mt: 1 }}>Combines with</Typography>
+                            <Box sx={{ display:'flex', gap:2, flexWrap:'wrap', mb:1 }}>
+                              <FormControlLabel control={<Checkbox checked={!!couponForm.combinesWithOrder} onChange={(e)=>setCouponForm(v=>({...v, combinesWithOrder:e.target.checked}))} />} label={<span style={{color:'rgba(255,255,255,0.85)'}}>Order</span>} />
+                              <FormControlLabel control={<Checkbox checked={!!couponForm.combinesWithProduct} onChange={(e)=>setCouponForm(v=>({...v, combinesWithProduct:e.target.checked}))} />} label={<span style={{color:'rgba(255,255,255,0.85)'}}>Product</span>} />
+                              <FormControlLabel control={<Checkbox checked={!!couponForm.combinesWithShipping} onChange={(e)=>setCouponForm(v=>({...v, combinesWithShipping:e.target.checked}))} />} label={<span style={{color:'rgba(255,255,255,0.85)'}}>Shipping</span>} />
+                            </Box>
+
+                            <Typography variant="subtitle2" sx={{ color: 'rgba(255,255,255,0.9)' }}>Requisiti minimi</Typography>
+                            <Grid container spacing={1}>
+                              <Grid size={{ xs:12, md:6 }}>
+                                <TextField label="Min. Subtotal (valuta)" type="number" size="small" sx={textFieldSx}
+                                  value={couponForm.minSubtotal ?? ''} onChange={(e)=>setCouponForm(v=>({...v, minSubtotal:e.target.value?Number(e.target.value):undefined}))} fullWidth />
+                              </Grid>
+                              <Grid size={{ xs:12, md:6 }}>
+                                <TextField label="Min. Qty" type="number" size="small" sx={textFieldSx}
+                                  value={couponForm.minQty ?? ''} onChange={(e)=>setCouponForm(v=>({...v, minQty:e.target.value?Number(e.target.value):undefined}))} fullWidth />
+                              </Grid>
+                            </Grid>
+
+                            <Typography variant="subtitle2" sx={{ color: 'rgba(255,255,255,0.9)', mt: 1 }}>Scope</Typography>
+                            <TextField label="Product IDs (comma-separated)" size="small" sx={textFieldSx}
+                              value={couponForm.productIdsRaw} onChange={(e)=>setCouponForm(v=>({...v, productIdsRaw:e.target.value}))} fullWidth />
+                            <TextField label="Collection IDs (comma-separated)" size="small" sx={textFieldSx}
+                              value={couponForm.collectionIdsRaw} onChange={(e)=>setCouponForm(v=>({...v, collectionIdsRaw:e.target.value}))} fullWidth />
+
+                            <Button variant="contained" startIcon={<DiscountIcon />} onClick={createCoupon} sx={{ mt: 1 }}>
+                              Crea coupon
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+                  </>
+                ) : (
+                  // ---------------- CREATOR TAB ----------------
+                  <>
+                    <Grid container spacing={2} sx={{ mb: 1 }}>
+                      <Grid size={{ xs: 12 }}>
+                        <Card sx={{
+                          borderRadius: 3, borderColor: 'rgba(255,255,255,0.08)',
+                          background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
+                          backdropFilter: 'blur(8px)',
+                        }}>
+                          <CardContent>
+                            <Grid container spacing={1}>
+                              <Grid size={{ xs: 12, md: 6 }}>
+                                <TextField
+                                  label="Seleziona Creator"
+                                  select
+                                  size="small"
+                                  sx={textFieldSx}
+                                  value={selectedCreatorId}
+                                  onChange={(e)=>setSelectedCreatorId(e.target.value)}
+                                  fullWidth
+                                >
+                                  {creators.map(cr => (
+                                    <MenuItem key={cr.creatorId} value={cr.creatorId}>
+                                      {cr.creatorName || cr.creatorId}
+                                    </MenuItem>
+                                  ))}
+                                </TextField>
+                              </Grid>
+                              <Grid size={{ xs: 12, md: 6 }}>
+                                <TextField
+                                  label="Redirect path (link creator)"
+                                  size="small"
+                                  sx={textFieldSx}
+                                  value={creatorLinkForm.redirectPath}
+                                  onChange={(e)=>setCreatorLinkForm({ redirectPath: e.target.value })}
+                                  fullWidth
+                                />
+                              </Grid>
+                            </Grid>
+                            <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                              <Button variant="contained" startIcon={<LinkIcon />} onClick={createCreatorLink}>
+                                Crea link per creator
+                              </Button>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+
+                    {/* KPI Row (creator) */}
+                    <Grid container spacing={2} sx={{ mb: 1 }}>
+                      {[
+                        { title: 'Revenue', value: `€ ${fmt(ck?.revenue)}`, icon: <MonetizationOnIcon fontSize="small" /> },
+                        { title: 'Acquisti', value: fmt(ck?.purchases, 0), icon: <ShoppingBagIcon fontSize="small" /> },
+                        { title: 'CVR', value: ck ? `${fmt((ck.cvr || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" /> },
+                        { title: 'AOV', value: `€ ${fmt(ck?.aov)}`, icon: <TrendingUpIcon fontSize="small" /> },
+                        { title: 'Abbandono', value: ck ? `${fmt((ck.abandonRate || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" /> },
+                      ].map((it) => (
+                        <Grid key={it.title} size={{ xs: 12, sm: 6, md: 4 }}>
+                          <KPI title={it.title} value={it.value} icon={it.icon} />
+                        </Grid>
+                      ))}
+                    </Grid>
+
+                    {/* Charts (creator) */}
+                    <Grid container spacing={2}>
+                      <Grid size={{ xs: 12 }}>
+                        <Card sx={{
+                          borderRadius: 3,
+                          borderColor: 'rgba(255,255,255,0.08)',
+                          background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.25) 100%)',
+                          backdropFilter: 'blur(8px)',
+                        }}>
+                          <CardContent>
+                            <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
+                              Trend (Creator)
+                            </Typography>
+                            <Box sx={{ width: '100%', height: 260 }}>
+                              <ResponsiveContainer>
+                                <AreaChart data={cSeries}>
+                                  <defs>
+                                    <linearGradient id="areaRevCreator" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor="#00E5FF" stopOpacity={0.9} />
+                                      <stop offset="100%" stopColor="#2962FF" stopOpacity={0.2} />
+                                    </linearGradient>
+                                  </defs>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                                  <XAxis dataKey="date" stroke="rgba(255,255,255,0.7)" />
+                                  <YAxis stroke="rgba(255,255,255,0.7)" />
+                                  <RTooltip contentStyle={{ backgroundColor: '#0B1020', border: '1px solid #26324d', color: '#fff' }} />
+                                  <Area dataKey="revenue" type="monotone" fill="url(#areaRevCreator)" stroke="#81D4FA" />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+                  </>
+                )}
               </>
             )}
           </Grid>
@@ -637,6 +987,63 @@ export default function Panel() {
           variant="filled"
           sx={{ width: '100%' }}
         >
+          {snack.msg}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}
+
+// -------- Inline component: AddCreator --------
+function AddCreatorInline({ campaignId, onAdded }: { campaignId: string; onAdded: () => void }) {
+  const [creatorId, setCreatorId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [snack, setSnack] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({ open: false, msg: '', severity: 'success' });
+  const notify = (m: string, s: 'success' | 'error' = 'success') => setSnack({ open: true, msg: m, severity: s });
+
+  const onAdd = async () => {
+    if (!creatorId.trim()) return notify('Inserisci un Creator ID', 'error');
+    try {
+      setLoading(true);
+      const r = await fetch(`/api/shopify/panel/campaigns/${campaignId}/creators`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ creatorId }),
+      });
+      const j: { ok: boolean; error?: string } = await r.json();
+      if (j.ok) {
+        setCreatorId('');
+        onAdded();
+        notify('Creator aggiunto');
+      } else notify(j.error || 'Errore', 'error');
+    } catch (e) { notify((e as Error).message, 'error'); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+      <TextField
+        label="Creator ID"
+        size="small"
+        value={creatorId}
+        onChange={(e) => setCreatorId(e.target.value)}
+        sx={{
+          mb: 0,
+          '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
+          '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+        }}
+      />
+      <Button variant="outlined" startIcon={<AddIcon />} onClick={onAdd} disabled={loading}>
+        Aggiungi creator
+      </Button>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={3000}
+        onClose={() => setSnack((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert onClose={() => setSnack((s) => ({ ...s, open: false }))} severity={snack.severity} variant="filled">
           {snack.msg}
         </Alert>
       </Snackbar>
