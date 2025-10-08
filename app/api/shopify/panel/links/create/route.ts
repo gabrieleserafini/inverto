@@ -2,89 +2,97 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { sanity } from '@/lib/sanity/client';
 import { getAdminSession } from '@/lib/shopify/session';
-import { adminGraphQL, MUT_DISCOUNT_CODE_BASIC_CREATE } from '@/lib/shopify/graphql';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function randomShort(n = 6): string {
-  const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < n; i++) s += a[Math.floor(Math.random() * a.length)];
-  return s;
+type Body = {
+  campaignId: string;
+  creatorId: string;     
+  linkId: string;        
+  code: string;          
+  percentage: number;    
+  redirectPath?: string; 
+};
+
+async function callShopify(shop: string, accessToken: string, query: string, variables) {
+  const res = await fetch(`https://${shop}/admin/api/2025-10/graphql.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': accessToken,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const json = await res.json();
+  return json;
 }
 
-type DiscountCreateData = {
-  discountCodeBasicCreate: {
-    userErrors: { message: string }[];
-    codeDiscountNode?: { id: string } | null;
-  };
-};
-
-type Body = {
-  campaignId: string;     
-  creatorId: string;
-  linkId: string;         
-  code: string;
-  percentage: number;
-  redirectPath?: string;
-};
-
-type CampaignPick = { shop: string; defaultLanding?: string };
-type LinkDoc = { shortCode?: string } | null;
+const MUTATION = `
+mutation CreateBasicDiscount($title: String!, $code: String!, $percentage: Float!) {
+  discountCodeBasicCreate(basicCodeDiscount: {
+    title: $title,
+    code: $code,
+    customerGets: { value: { percentage: { value: $percentage } }, items: { all: true } },
+    appliesOncePerCustomer: false,
+    startsAt: "${new Date().toISOString()}"
+  }) {
+    codeDiscountNode { id }
+    userErrors { field message }
+  }
+}
+`;
 
 export async function POST(req: Request) {
-  const session = await getAdminSession();
-  if (!session) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  const body: Body = await req.json();
+  const { campaignId, creatorId, linkId, code, percentage, redirectPath = '/collections/all' } = body;
 
-  const { campaignId, creatorId, linkId, code, percentage, redirectPath }: Body = await req.json();
-
-  const campaign = await sanity.fetch<CampaignPick>(
-    `*[_type=="campaign" && _id==$id][0]{shop, defaultLanding}`,
-    { id: campaignId }
-  );
-  if (!campaign?.shop) {
-    return NextResponse.json({ ok: false, error: 'campaign_missing_shop' }, { status: 400 });
+  if (!campaignId || !linkId || !code || !percentage) {
+    return NextResponse.json({ ok: false, error: 'missing_fields' }, { status: 400 });
   }
 
-  const path = redirectPath && redirectPath.startsWith('/')
-    ? redirectPath
-    : new URL(campaign.defaultLanding || `https://${campaign.shop}`).pathname || '/';
-  const landingUrl = `https://${campaign.shop}/discount/${encodeURIComponent(code)}?redirect=${encodeURIComponent(path)}`;
+  const session = await getAdminSession().catch(() => null);
+  const shop = session?.shop;
+  const token = session?.accessToken;
 
-  const variables = {
-    basicCodeDiscount: {
-      title: `${creatorId}-${code}`,
-      code,
-      startsAt: new Date().toISOString(),
-      endsAt: null,
-      customerSelection: { all: true },
-      combinesWith: { orderDiscounts: true, productDiscounts: true, shippingDiscounts: false },
-      usageLimit: null,
-      appliesOncePerCustomer: false,
-      appliesOncePerOrder: false,
-      discount: { percentage: { value: percentage } },
-    },
-  };
-
-  const g = await adminGraphQL<DiscountCreateData>(session, MUT_DISCOUNT_CODE_BASIC_CREATE, variables);
-  const userErrors = g.data?.discountCodeBasicCreate?.userErrors ?? [];
-  if (userErrors.length) {
-    return NextResponse.json({ ok: false, userErrors }, { status: 400 });
+  if (!shop || !token) {
+    return NextResponse.json({ ok: false, error: 'no_shop_session' }, { status: 401 });
   }
 
-  const existing = await sanity.getDocument<LinkDoc>(linkId);
-  const shortCode = existing?.shortCode || randomShort();
+  // 1) Crea/aggiorna coupon 
+  const title = `Campaign ${campaignId}${creatorId ? ` · ${creatorId}` : ''}`;
+  const resp = await callShopify(shop, token, MUTATION, {
+    title,
+    code,
+    percentage: Number(percentage),
+  });
 
-  await sanity.patch(linkId).set({
-    campaignId, creatorId, couponCode: code, landingUrl, shortCode,
-  }).commit();
+  const userErrors = resp?.data?.discountCodeBasicCreate?.userErrors;
+  if (userErrors && userErrors.length) {
+    return NextResponse.json({ ok: false, userErrors }, { status: 200 });
+  }
+
+  // 2) Registra il link in Sanity
+  const shortCode = linkId; 
+  const landingUrl = `https://${shop}/discount/${encodeURIComponent(code)}?redirect=${encodeURIComponent(redirectPath)}`;
+
+  await sanity.createOrReplace({
+    _id: `coupon-${linkId}`,
+    _type: 'couponLink',
+    campaignRef: { _type: 'reference', _ref: campaignId },
+    creatorRef: creatorId && creatorId !== 'unknown' ? { _type: 'reference', _ref: creatorId } : undefined,
+    linkId,
+    code,
+    percentage: Number(percentage),
+    landingUrl,
+    short: `/api/c/${shortCode}`, 
+  });
 
   return NextResponse.json({
     ok: true,
     linkId,
     couponCode: code,
     landingUrl,
-    short: `/${shortCode}`,
-  });
+    short: `/api/c/${shortCode}`,
+  }, { status: 200 });
 }

@@ -1,11 +1,12 @@
 'use client';
 
 import useSWR from 'swr';
+import type React from 'react';
 import { useMemo, useState } from 'react';
 import {
   Box, Container, Card, CardContent, Typography, Button,
   TextField, List, ListItemButton, ListItemText, Divider, Chip,
-  IconButton, Tooltip, Grid, Snackbar, Alert, InputAdornment
+  IconButton, Tooltip, Snackbar, Alert, InputAdornment, Grid
 } from '@mui/material';
 
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -68,17 +69,22 @@ const fmt = (n?: number, d = 2) =>
   n == null || Number.isNaN(n) ? '—' : new Intl.NumberFormat('it-IT', { maximumFractionDigits: d }).format(n);
 
 const API = {
-  campaigns: '/api/shopify/panel/campaigns',
-  connect: '/api/shopify/panel/campaigns/connect',
+  campaigns: '/api/shopify/panel/campaigns',                
+  connect: '/api/shopify/panel/campaigns',                   
   perf: (id: string) => `/api/shopify/panel/campaigns/${id}/performance`,
   addCreator: '/api/shopify/panel/creators/add',
   createLink: '/api/shopify/panel/links/create',
 };
 
 async function fetcher<T>(u: string): Promise<T> {
-  const r = await fetch(u);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return (await r.json()) as T;
+  const r = await fetch(u, { method: 'GET' });
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { const j = JSON.parse(text); msg = j?.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
 function errorMsg(e: unknown): string {
@@ -92,7 +98,8 @@ function KPI({
 }) {
   const deltaText = deltaPct == null ? '—' : `${deltaPct > 0 ? '+' : ''}${fmt(deltaPct * 100, 1)}%`;
   const deltaColor =
-    deltaPct == null ? 'default' : deltaPct > 0 ? 'success' : deltaPct < 0 ? 'error' : 'default';
+    (deltaPct == null ? 'default' : deltaPct > 0 ? 'success' : deltaPct < 0 ? 'error' : 'default') as
+      'default' | 'success' | 'error';
 
   return (
     <Card
@@ -171,7 +178,7 @@ export default function Panel() {
   }, [campaigns, search]);
 
   // selezione
-    const [selected, setSelected] = useState<{ _id: string; name?: string } | null>(null);
+  const [selected, setSelected] = useState<{ _id: string; name?: string } | null>(null);
 
   // Performance campagna selezionata
   const { data: perfResp, mutate: refetchPerf } = useSWR<PerformanceResponse>(
@@ -209,27 +216,32 @@ export default function Panel() {
   const notify = (msg: string, severity: 'success' | 'error' = 'success') => setSnack({ open: true, msg, severity });
 
   const onConnect = async () => {
-        try {
-            const payload = {
-            campaignId: connectForm.campaignId.trim(),
-            ...(shopFromSession ? {} : connectForm.shop ? { shop: connectForm.shop.trim() } : {}),
-            defaultLanding: connectForm.defaultLanding?.trim() || undefined,
-            };
-            const r = await fetch(API.connect, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload),
-            });
-            const data: ConnectResponse = await r.json();
-            if (data.ok) {
-            setConnectForm({ campaignId: '', shop: '', defaultLanding: '' });
-            refetchCampaigns();
-            notify('Campagna abilitata');
-            } else {
-            notify(JSON.stringify(data), 'error');
-            }
-        } catch (e: unknown) {
-            notify(errorMsg(e), 'error');
-        }
+    try {
+      const payload = {
+        campaignId: connectForm.campaignId.trim(),
+        ...(shopFromSession
+          ? {}
+          : connectForm.shop
+          ? { shop: connectForm.shop.trim() }
+          : {}),
+        defaultLanding: connectForm.defaultLanding?.trim() || undefined,
+      };
+      const r = await fetch(API.connect, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data: ConnectResponse = await r.json();
+      if (data.ok) {
+        setConnectForm({ campaignId: '', shop: '', defaultLanding: '' });
+        await refetchCampaigns();
+        notify('Campagna abilitata');
+      } else {
+        const err = 'error' in data ? data.error : 'Operazione non riuscita';
+        notify(err, 'error');
+      }
+    } catch (e: unknown) {
+      notify(errorMsg(e), 'error');
+    }
   };
 
   const onAddCreator = async () => {
@@ -266,7 +278,7 @@ export default function Panel() {
       if (data.ok) {
         notify(`Creato coupon ${data.couponCode}. Short: ${data.short}`);
         setLinkForm({ linkId: '', code: '', percentage: 10, redirectPath: '' });
-        refetchPerf();
+        await refetchPerf();
       } else notify(JSON.stringify(data), 'error');
     } catch (e: unknown) { notify(errorMsg(e), 'error'); }
   };
@@ -295,7 +307,7 @@ export default function Panel() {
       position: 'relative', overflow: 'hidden',
       '&::before': {
         content: '""', position: 'absolute', inset: 0,
-        background: 'conic-gradient(from 180deg at 50% 50%, rgba(0,153,255,0.06), rgba(41,98,255,0.06), rgba(0,153,255,0.06))',
+        background: 'conic-gradient(from 180deg at 50% 50%, rgba(0,153,255,0.06), rgba(41,98,255,0.06), rgba(0,0,0,0.06))',
         animation: 'spin 28s linear infinite', opacity: 0.5,
       },
       '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } },
@@ -345,15 +357,15 @@ export default function Panel() {
                 <List dense sx={{ maxHeight: 280, overflow: 'auto' }}>
                   {filteredCampaigns.map((c) => (
                     <ListItemButton
-                    key={c._id}
-                    selected={selected?._id === c._id}
-                    onClick={() => setSelected({ _id: c._id, name: c.name })}
-                    sx={{ borderRadius: 2 }}
+                      key={c._id}
+                      selected={selected?._id === c._id}
+                      onClick={() => setSelected({ _id: c._id, name: c.name })}
+                      sx={{ borderRadius: 2 }}
                     >
-                    <ListItemText
+                      <ListItemText
                         primary={<span style={{ color: '#fff' }}>{c.name || '—'}</span>}
                         secondary={<span style={{ color: 'rgba(255,255,255,0.7)' }}>{c.shop || '—'}</span>}
-                    />
+                      />
                     </ListItemButton>
                   ))}
                   {!loadingCampaigns && filteredCampaigns.length === 0 && (
@@ -366,40 +378,32 @@ export default function Panel() {
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.12)' }} />
                 <Typography variant="subtitle1" sx={{ color: '#fff', mb: 1 }}>Collega/abilita campagna</Typography>
                 <TextField
-                    label="Campaign ID"
-                    size="small"
-                    value={connectForm.campaignId}
-                    onChange={(e) => setConnectForm((v) => ({ ...v, campaignId: e.target.value }))}
-                    sx={{
-                        mb: 1,
-                        '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
-                        '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
-                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
-                    }}
-                    fullWidth
+                  label="Campaign ID"
+                  size="small"
+                  value={connectForm.campaignId}
+                  onChange={(e) => setConnectForm((v) => ({ ...v, campaignId: e.target.value }))}
+                  sx={{
+                    mb: 1,
+                    '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
+                    '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                  }}
+                  fullWidth
                 />
                 <TextField
                   label="Shop (myshopify.com)"
                   size="small"
-                  value={connectForm.shop}
+                  value={shopFromSession || connectForm.shop}
                   onChange={(e) => setConnectForm((v) => ({ ...v, shop: e.target.value }))}
-                  sx={{ mb: 1 }}
+                  helperText={shopFromSession ? 'Rilevato dalla sessione Shopify' : 'Puoi inserirlo come fallback'}
+                  sx={{
+                    mb: 1,
+                    '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
+                    '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
+                    '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.6)' },
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                  }}
                   fullWidth
-                />
-                <TextField
-                    label="Shop (myshopify.com)"
-                    size="small"
-                    value={shopFromSession || connectForm.shop}
-                    onChange={(e) => setConnectForm((v) => ({ ...v, shop: e.target.value }))}
-                    helperText={shopFromSession ? 'Rilevato dalla sessione Shopify' : 'Puoi inserirlo come fallback'}
-                    sx={{
-                        mb: 1,
-                        '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,0.06)', color: 'white' },
-                        '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.8)' },
-                        '& .MuiFormHelperText-root': { color: 'rgba(255,255,255,0.6)' },
-                        '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
-                    }}
-                    fullWidth
                 />
                 <TextField
                   label="Default landing (opz.)"
@@ -439,7 +443,7 @@ export default function Panel() {
                     { title: 'AOV', value: `€ ${fmt(k?.aov)}`, icon: <TrendingUpIcon fontSize="small" /> },
                     { title: 'Abbandono', value: k ? `${fmt((k.abandonRate || 0) * 100)}%` : '—', icon: <PercentIcon fontSize="small" /> },
                   ].map((it) => (
-                    <Grid key={it.title} size={{ xs: 12, sm: 6, md: 4, lg: 2.4 }}>
+                    <Grid key={it.title} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
                       <KPI title={it.title} value={it.value} icon={it.icon} spark={it.spark} deltaPct={it.delta ?? undefined} />
                     </Grid>
                   ))}
@@ -501,7 +505,7 @@ export default function Panel() {
                   </Grid>
 
                   {/* Trend area */}
-                  <Grid size={12}>
+                  <Grid size={{ xs: 12 }}>
                     <Card sx={{
                       borderRadius: 3,
                       borderColor: 'rgba(255,255,255,0.08)',

@@ -5,16 +5,24 @@ import { sanity } from '@/lib/sanity/client';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type Body = { campaignId: string; creatorId: string };
+
 export async function POST(req: Request) {
-  const { campaignId, creatorId } = await req.json() as { campaignId: string; creatorId: string; };
-  if (!campaignId || !creatorId) return NextResponse.json({ ok:false, error:'missing params' }, { status:400 });
+  const { campaignId, creatorId }: Body = await req.json();
 
-  const doc = await sanity.create({
+  if (!campaignId || !creatorId) {
+    return NextResponse.json({ ok: false, error: 'missing_fields' }, { status: 400 });
+  }
+
+  const linkId = `${campaignId}_${creatorId}`;
+  const doc = {
+    _id: `link-${linkId}`,
     _type: 'campaignCreatorLink',
-    campaignId, creatorId,
-    landingUrl: '', shortCode: '', couponCode: '',
-    createdAt: new Date().toISOString(),
-  });
+    campaignRef: { _type: 'reference', _ref: campaignId },
+    creatorRef: { _type: 'reference', _ref: creatorId },
+    linkId,
+  };
 
-  return NextResponse.json({ ok:true, linkId: doc._id });
+  const res = await sanity.createIfNotExists(doc);
+  return NextResponse.json({ ok: true, linkId: res.linkId || linkId }, { status: 200 });
 }
