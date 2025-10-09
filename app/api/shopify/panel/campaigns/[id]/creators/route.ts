@@ -5,7 +5,12 @@ import { sanity } from '@/lib/sanity/client';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+type Params = { id: string };
+type Ctx = { params: Promise<Params> };
+
+export async function GET(_req: Request, ctx: Ctx) {
+  const { id } = await ctx.params;
+
   const data = await sanity.fetch(
     `{
       "creators": *[_type=="campaignCreatorLink" && campaignRef._ref==$id]{
@@ -14,20 +19,28 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         "creatorName": creatorRef->name
       } | order(_createdAt desc)
     }`,
-    { id: params.id }
+    { id }
   );
+
   return NextResponse.json({ ok: true, ...data });
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const { creatorId } = await req.json().catch(() => ({}));
-  if (!creatorId) return NextResponse.json({ ok: false, error: 'missing_creatorId' }, { status: 400 });
+export async function POST(req: Request, ctx: Ctx) {
+  const { id } = await ctx.params;
+
+  const body = (await req.json().catch(() => ({}))) as { creatorId?: string };
+  const creatorId = typeof body.creatorId === 'string' ? body.creatorId : undefined;
+
+  if (!creatorId) {
+    return NextResponse.json({ ok: false, error: 'missing_creatorId' }, { status: 400 });
+  }
 
   const created = await sanity.create({
     _type: 'campaignCreatorLink',
-    campaignRef: { _type: 'reference', _ref: params.id },
+    campaignRef: { _type: 'reference', _ref: id },
     creatorRef: { _type: 'reference', _ref: creatorId },
     createdAt: new Date().toISOString(),
   });
+
   return NextResponse.json({ ok: true, linkId: created._id });
 }

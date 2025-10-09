@@ -5,7 +5,11 @@ import { sanity } from '@/lib/sanity/client';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+type Params = { id: string };
+type Ctx = { params: Promise<Params> };
+
+export async function GET(_req: Request, ctx: Ctx) {
+  const { id } = await ctx.params;
   const data = await sanity.fetch(`
     {
       "series": *[_type=="metricDaily" && campaignRef._ref==$id] | order(date asc){
@@ -18,7 +22,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         title, qty, revenue
       }
     }`,
-    { id: params.id }
+    { id: id }
   );
 
   return NextResponse.json({ ok: true, ...data });

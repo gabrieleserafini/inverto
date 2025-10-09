@@ -5,14 +5,20 @@ import { sanity } from '@/lib/sanity/client';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request, { params }: { params: { id: string; creatorId: string } }) {
-  const { redirectPath = '/collections/all' } = await req.json().catch(() => ({}));
+type Params = { id: string; creatorId: string };
+type Ctx = { params: Promise<Params> };
+
+export async function POST(req: Request, ctx: Ctx) {
+  const { id, creatorId } = await ctx.params;
+
+  const body = (await req.json().catch(() => ({}))) as { redirectPath?: string };
+  const redirectPath = body.redirectPath ?? '/collections/all';
 
   const linkDoc = await sanity.create({
     _type: 'trackingLink',
     scope: 'creator',
-    campaignRef: { _type: 'reference', _ref: params.id },
-    creatorRef: { _type: 'reference', _ref: params.creatorId },
+    campaignRef: { _type: 'reference', _ref: id },
+    creatorRef: { _type: 'reference', _ref: creatorId },
     redirectPath,
     createdAt: new Date().toISOString(),
   });
