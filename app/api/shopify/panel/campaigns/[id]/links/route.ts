@@ -1,4 +1,3 @@
-// app/api/.../[id]/links/route.ts  (adatta il path reale)
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { sanity } from '@/lib/sanity/client';
