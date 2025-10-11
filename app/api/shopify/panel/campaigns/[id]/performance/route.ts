@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { sanity } from '@/lib/sanity/client';
+import { resolveCampaignDocId } from '../../helper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,9 @@ type Ctx = { params: Promise<Params> };
 
 export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
+    const idx = await resolveCampaignDocId(id);
+  if (!idx) return NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 });
+
   const data = await sanity.fetch(`
     {
       "series": *[_type=="metricDaily" && campaignRef._ref==$id] | order(date asc){
@@ -22,7 +26,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         title, qty, revenue
       }
     }`,
-    { id: id }
+    { id: idx }
   );
 
   return NextResponse.json({ ok: true, ...data });

@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { sanity } from '@/lib/sanity/client';
+import { resolveCampaignDocId } from '../../helper';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,9 @@ type Ctx = { params: Promise<Params> };
 
 export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
-
+  const idx = await resolveCampaignDocId(id);
+  if (!idx) return NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 });
+  
   const data = await sanity.fetch(
     `{
       "creators": *[_type=="campaignCreatorLink" && campaignRef._ref==$id]{
@@ -19,7 +22,7 @@ export async function GET(_req: Request, ctx: Ctx) {
         "creatorName": creatorRef->name
       } | order(_createdAt desc)
     }`,
-    { id }
+    { idx }
   );
 
   return NextResponse.json({ ok: true, ...data });
@@ -27,6 +30,8 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 export async function POST(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
+  const idx = await resolveCampaignDocId(id);
+  if (!idx) return NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 });
 
   const body = (await req.json().catch(() => ({}))) as { creatorId?: string };
   const creatorId = typeof body.creatorId === 'string' ? body.creatorId : undefined;
@@ -37,7 +42,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
   const created = await sanity.create({
     _type: 'campaignCreatorLink',
-    campaignRef: { _type: 'reference', _ref: id },
+    campaignRef: { _type: 'reference', _ref: idx },
     creatorRef: { _type: 'reference', _ref: creatorId },
     createdAt: new Date().toISOString(),
   });
