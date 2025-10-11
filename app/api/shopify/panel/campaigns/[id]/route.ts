@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type Params = { id: string };
-type Ctx = { params: Params };
+type Ctx = { params: Promise<Params> }; 
 
 // ——— Helpers —————————————————————————————————————————————
 const CORS_HEADERS = {
@@ -16,7 +16,7 @@ const CORS_HEADERS = {
 };
 
 function withCors(res: NextResponse) {
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v as string));
   return res;
 }
 
@@ -30,14 +30,14 @@ async function resolveCampaignId(idOrSlug: string): Promise<string | null> {
 }
 
 // ——— OPTIONS —————————————————————————————————————————————
-export async function OPTIONS() {
+export async function OPTIONS(_req: Request, _ctx: Ctx) {
   return withCors(new NextResponse(null, { status: 204 }));
 }
 
 // ——— GET /api/shopify/panel/campaigns/[id] ————————————————
 export async function GET(_req: Request, ctx: Ctx) {
   try {
-    const idOrSlug = ctx.params.id;
+    const { id: idOrSlug } = await ctx.params;
     const _id = await resolveCampaignId(idOrSlug);
     if (!_id) return withCors(NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 }));
 
@@ -58,7 +58,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 // ——— PATCH /api/shopify/panel/campaigns/[id] ——————————————
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
-    const idOrSlug = ctx.params.id;
+    const { id: idOrSlug } = await ctx.params;
     const _id = await resolveCampaignId(idOrSlug);
     if (!_id) return withCors(NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 }));
 
@@ -66,7 +66,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       enabled: boolean;
       name: string;
       defaultLanding: string;
-      shop: string; // opzionale se vuoi aggiornarlo da pannello
+      shop: string; // opzionale
     }>;
 
     if (!Object.keys(body).length) {
@@ -91,7 +91,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 // ——— DELETE /api/shopify/panel/campaigns/[id] —————————————
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
-    const idOrSlug = ctx.params.id;
+    const { id: idOrSlug } = await ctx.params;
     const _id = await resolveCampaignId(idOrSlug);
     if (!_id) return withCors(NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 }));
 

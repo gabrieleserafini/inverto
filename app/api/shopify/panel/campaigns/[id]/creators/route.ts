@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type Params = { id: string };
-type Ctx = { params: Params };
+type Ctx = { params: Promise<Params> }; 
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': process.env.NEXT_PUBLIC_APP_URL || '*',
@@ -15,7 +15,7 @@ const CORS_HEADERS = {
 };
 
 function withCors(res: NextResponse) {
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v as string));
   return res;
 }
 
@@ -27,14 +27,14 @@ async function resolveCampaignId(idOrSlug: string): Promise<string | null> {
   return doc?._id ?? null;
 }
 
-export async function OPTIONS() {
+export async function OPTIONS(_req: Request, _ctx: Ctx) {
   return withCors(new NextResponse(null, { status: 204 }));
 }
 
 // —— GET creators list ————————————————————————————————
 export async function GET(_req: Request, ctx: Ctx) {
   try {
-    const idOrSlug = ctx.params.id;
+    const { id: idOrSlug } = await ctx.params;
     const campaignId = await resolveCampaignId(idOrSlug);
     if (!campaignId) {
       return withCors(NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 }));
@@ -61,7 +61,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 // —— POST add creator ————————————————————————————————
 export async function POST(req: Request, ctx: Ctx) {
   try {
-    const idOrSlug = ctx.params.id;
+    const { id: idOrSlug } = await ctx.params;
     const campaignId = await resolveCampaignId(idOrSlug);
     if (!campaignId) {
       return withCors(NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 }));
