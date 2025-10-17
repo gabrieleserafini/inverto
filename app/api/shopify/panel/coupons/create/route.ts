@@ -32,6 +32,13 @@ export async function POST(req: Request) {
   }
 
   const payload = await req.json();
+  const shopFromPayload = payload.shop;
+
+  // Ensure the coupon is being created for the shop we have a session for
+  if (shopFromPayload && session.shop !== shopFromPayload) {
+    console.warn(`Coupon creation attempt for shop ${shopFromPayload} but session is for ${session.shop}`);
+    return NextResponse.json({ ok: false, error: 'shop_mismatch' }, { status: 400 });
+  }
 
   const variables = {
     basicCodeDiscount: {

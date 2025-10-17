@@ -481,7 +481,8 @@ export default function Panel() {
       const r = await fetch(API.couponsCreate, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, shop: selected?.shop }),
+        credentials: "include",
       });
 
       const data: CouponResponse = await r.json();

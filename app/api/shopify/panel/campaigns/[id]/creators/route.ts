@@ -75,11 +75,32 @@ export async function POST(req: Request, ctx: Ctx) {
       return withCors(NextResponse.json({ ok: false, error: 'missing_creatorId' }, { status: 400 }));
     }
 
+    // Check if creator exists
+    let creatorDoc = await sanity.fetch<{ _id: string } | null>(
+      `*[_type=="creator" && creatorId==$creatorId][0]{ _id }`,
+      { creatorId }
+    );
+
+    // If not, create it
+    if (!creatorDoc) {
+      creatorDoc = await sanity.create({
+        _type: 'creator',
+        creatorId: creatorId,
+        name: creatorId, // default name to id
+      });
+    }
+
+    if (!creatorDoc?._id) {
+      throw new Error('Failed to find or create creator document');
+    }
+    const creatorRefId = creatorDoc._id;
+
+
     // crea link campagna<->creator
     const created = await sanity.create({
       _type: 'campaignCreatorLink',
       campaignRef: { _type: 'reference', _ref: campaignId },
-      creatorRef: { _type: 'reference', _ref: creatorId },
+      creatorRef: { _type: 'reference', _ref: creatorRefId },
       createdAt: new Date().toISOString(),
     });
 
