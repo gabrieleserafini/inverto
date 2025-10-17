@@ -10,12 +10,13 @@ type Params = { id: string; creatorId: string };
 type Ctx = { params: Promise<Params> };
 
 export async function GET(_req: Request, ctx: Ctx) {
-  const { id, creatorId } = await ctx.params;
-  const idx = await resolveCampaignDocId(id);
-  if (!idx) return NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 });
+  try {
+    const { id, creatorId } = await ctx.params;
+    const idx = await resolveCampaignDocId(id);
+    if (!idx) return NextResponse.json({ ok: false, error: 'campaign_not_found' }, { status: 404 });
 
-  const data = await sanity.fetch(
-    `
+    const data = await sanity.fetch(
+      `
     {
       "series": *[_type=="metricDaily" && campaignRef._ref==$id && creatorRef._ref==$creatorId] | order(date asc){
         date, pageViews, addToCart, beginCheckout, purchases, revenue, cvr, abandonRate, aov
@@ -27,8 +28,12 @@ export async function GET(_req: Request, ctx: Ctx) {
         title, qty, revenue
       }
     }`,
-    { idx, creatorId }
-  );
+      { id: idx, creatorId }
+    );
 
-  return NextResponse.json({ ok: true, ...data });
+    return NextResponse.json({ ok: true, ...data });
+  } catch (err) {
+    console.error(`GET creator performance error`, err);
+    return NextResponse.json({ ok: false, error: 'server_error' }, { status: 500 });
+  }
 }

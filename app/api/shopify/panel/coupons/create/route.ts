@@ -5,6 +5,21 @@ import { getAdminSession } from '@/lib/shopify/session';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': process.env.NEXT_PUBLIC_APP_URL || '*',
+  'Access-Control-Allow-Methods': 'POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Requested-With',
+};
+
+function withCors(res: NextResponse) {
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v as string));
+  return res;
+}
+
+export async function OPTIONS(_req: Request) {
+  return withCors(new NextResponse(null, { status: 204 }));
+}
+
 const MUTATION = `
 mutation DiscountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
   discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
@@ -28,13 +43,13 @@ mutation DiscountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
 export async function POST(req: Request) {
   const session = await getAdminSession().catch(() => null);
   if (!session) {
-    return NextResponse.json({ ok: false, error: 'session_not_found' }, { status: 400 });
+    return withCors(NextResponse.json({ ok: false, error: 'session_not_found' }, { status: 400 }));
   }
   if (!session.shop) {
-    return NextResponse.json({ ok: false, error: 'session_missing_shop' }, { status: 400 });
+    return withCors(NextResponse.json({ ok: false, error: 'session_missing_shop' }, { status: 400 }));
   }
   if (!session.accessToken) {
-    return NextResponse.json({ ok: false, error: 'session_missing_token' }, { status: 400 });
+    return withCors(NextResponse.json({ ok: false, error: 'session_missing_token' }, { status: 400 }));
   }
 
   const payload = await req.json();
@@ -43,7 +58,7 @@ export async function POST(req: Request) {
   // Ensure the coupon is being created for the shop we have a session for
   if (shopFromPayload && session.shop !== shopFromPayload) {
     console.warn(`Coupon creation attempt for shop ${shopFromPayload} but session is for ${session.shop}`);
-    return NextResponse.json({ ok: false, error: 'shop_mismatch' }, { status: 400 });
+    return withCors(NextResponse.json({ ok: false, error: 'shop_mismatch' }, { status: 400 }));
   }
 
   const variables = {
@@ -90,11 +105,11 @@ export async function POST(req: Request) {
   const json = await r.json();
   const out = json?.data?.discountCodeBasicCreate;
   if (!out || (out.userErrors && out.userErrors.length > 0)) {
-    return NextResponse.json({ ok: false, userErrors: out?.userErrors || [{ message: 'unknown_error' }] }, { status: 400 });
+    return withCors(NextResponse.json({ ok: false, userErrors: out?.userErrors || [{ message: 'unknown_error' }] }, { status: 400 }));
   }
 
   const node = out.codeDiscountNode;
   const code = node?.codeDiscount?.codes?.nodes?.[0]?.code;
   const status = node?.codeDiscount?.status;
-  return NextResponse.json({ ok: true, couponCode: code, status, nodeId: node?.id });
+  return withCors(NextResponse.json({ ok: true, couponCode: code, status, nodeId: node?.id }));
 }
