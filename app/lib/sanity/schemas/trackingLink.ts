@@ -1,10 +1,11 @@
 import type { Rule } from "sanity";
 
-const campaignCreatorLink = {
-  name: "campaignCreatorLink",
-  title: "Campaign ↔ Creator Link",
+const trackingLink = {
+  name: "trackingLink",
+  title: "Tracking Link",
   type: "document",
   fields: [
+    { name: "scope", type: "string" },
     {
       name: "campaignRef",
       title: "Campaign",
@@ -19,12 +20,9 @@ const campaignCreatorLink = {
       to: [{ type: "creator" }],
       validation: (Rule: Rule) => Rule.required(),
     },
-    { name: "landingUrl", type: "url" },
-    { name: "shortCode", type: "string" },
-    { name: "couponCode", type: "string" },
-    { name: 'createdAt', type: 'datetime' },
-    { name: "utmContent", type: "string" },
+    { name: "redirectPath", type: "string" },
+    { name: "createdAt", type: "datetime" },
   ],
 };
 
-export default campaignCreatorLink;
+export default trackingLink;

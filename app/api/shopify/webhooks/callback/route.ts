@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     topic,
     shop,
     receivedAt: new Date().toISOString(),
-    payload,
+    payload: { raw: raw.toString('utf8') },
     status: 'received',
   });
 

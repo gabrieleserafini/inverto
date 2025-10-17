@@ -27,6 +27,7 @@ async function resolveCampaignId(idOrSlug: string): Promise<string | null> {
   return doc?._id ?? null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function OPTIONS(_req: Request, _ctx: Ctx) {
   return withCors(new NextResponse(null, { status: 204 }));
 }

@@ -61,7 +61,7 @@ type PerformanceResponse = {
   topProducts: TopProduct[];
 };
 
-type MeResponse = { ok: true; shop: string } | { ok: false; error: string };
+
 
 type CreatorsListResponse = {
   ok: true;
@@ -259,7 +259,7 @@ export default function Panel() {
   const [tab, setTab] = useState<"overview" | "creator">("overview");
 
   // Performance (global)
-  const { data: perfResp, mutate: refetchPerf } = useSWR<PerformanceResponse>(selected ? API.perf(selected._id) : null, fetcher);
+  const { data: perfResp } = useSWR<PerformanceResponse>(selected ? API.perf(selected._id) : null, fetcher);
   const series: DailyPoint[] = perfResp?.series ?? [];
   const k: KPIs = perfResp?.kpis ?? null;
   const topProducts: TopProduct[] = perfResp?.topProducts ?? [];
@@ -287,7 +287,7 @@ export default function Panel() {
   }, [tab, creators, selectedCreatorId]);
 
   // Creator performance
-  const { data: creatorPerfResp, mutate: refetchCreatorPerf } = useSWR<CreatorPerfResponse>(selected && selectedCreatorId ? API.creatorPerf(selected._id, selectedCreatorId) : null, fetcher);
+  const { data: creatorPerfResp } = useSWR<CreatorPerfResponse>(selected && selectedCreatorId ? API.creatorPerf(selected._id, selectedCreatorId) : null, fetcher);
   const cSeries: DailyPoint[] = creatorPerfResp?.series ?? [];
   const ck: KPIs = creatorPerfResp?.kpis ?? null;
 
@@ -318,7 +318,7 @@ export default function Panel() {
     return () => {
       cancelled = true;
     };
-  }, [selected?._id, creators]);
+  }, [selected, creators]);
 
   // Forms
   const [connectForm, setConnectForm] = useState<{ campaignId: string; shop: string; defaultLanding: string }>({

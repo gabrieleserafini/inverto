@@ -1,10 +1,10 @@
 const campaignMetricsDaily = {
-  name: "campaignMetricsDaily",
+  name: "metricDaily",
   title: "Campaign Metrics (Daily)",
   type: "document",
   fields: [
-    { name: "campaignId", type: "string" },
-    { name: "creatorId", type: "string" },
+    { name: "campaignRef", title: "Campaign", type: "reference", to: [{ type: "campaign" }] },
+    { name: "creatorRef", title: "Creator", type: "reference", to: [{ type: "creator" }] },
     { name: "date", type: "date" },
     { name: "pageViews", type: "number" },
     { name: "addToCart", type: "number" },
