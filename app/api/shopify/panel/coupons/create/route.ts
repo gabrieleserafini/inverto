@@ -27,8 +27,14 @@ mutation DiscountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
 
 export async function POST(req: Request) {
   const session = await getAdminSession().catch(() => null);
-  if (!session?.accessToken || !session.shop) {
-    return NextResponse.json({ ok: false, error: 'shop_not_available' }, { status: 400 });
+  if (!session) {
+    return NextResponse.json({ ok: false, error: 'session_not_found' }, { status: 400 });
+  }
+  if (!session.shop) {
+    return NextResponse.json({ ok: false, error: 'session_missing_shop' }, { status: 400 });
+  }
+  if (!session.accessToken) {
+    return NextResponse.json({ ok: false, error: 'session_missing_token' }, { status: 400 });
   }
 
   const payload = await req.json();
