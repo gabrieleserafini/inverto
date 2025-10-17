@@ -7,14 +7,8 @@ export const dynamic = 'force-dynamic';
 
 function withCors(res: NextResponse, req: Request) {
   const origin = req.headers.get('Origin');
-
-  // Reflect the origin if it's a shopify domain, otherwise use the app URL.
-  if (origin && origin.endsWith('.myshopify.com')) {
-    res.headers.set('Access-Control-Allow-Origin', origin);
-  } else {
-    res.headers.set('Access-Control-Allow-Origin', process.env.SHOPIFY_APP_URL || '*');
-  }
-
+  // Allow requests from any origin. Be more restrictive in production.
+  res.headers.set('Access-Control-Allow-Origin', origin || '*');
   res.headers.set('Access-Control-Allow-Credentials', 'true');
   res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
