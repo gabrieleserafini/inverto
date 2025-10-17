@@ -5,19 +5,24 @@ import { getAdminSession } from '@/lib/shopify/session';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': process.env.NEXT_PUBLIC_APP_URL || '*',
-  'Access-Control-Allow-Methods': 'POST,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Requested-With',
-};
+function withCors(res: NextResponse, req: Request) {
+  const origin = req.headers.get('Origin');
 
-function withCors(res: NextResponse) {
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v as string));
+  // Reflect the origin if it's a shopify domain, otherwise use the app URL.
+  if (origin && origin.endsWith('.myshopify.com')) {
+    res.headers.set('Access-Control-Allow-Origin', origin);
+  } else {
+    res.headers.set('Access-Control-Allow-Origin', process.env.SHOPIFY_APP_URL || '*');
+  }
+
+  res.headers.set('Access-Control-Allow-Credentials', 'true');
+  res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   return res;
 }
 
-export async function OPTIONS(_req: Request) {
-  return withCors(new NextResponse(null, { status: 204 }));
+export async function OPTIONS(req: Request) {
+  return withCors(new NextResponse(null, { status: 204 }), req);
 }
 
 const MUTATION = `
@@ -41,75 +46,79 @@ mutation DiscountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
 `;
 
 export async function POST(req: Request) {
-  const session = await getAdminSession().catch(() => null);
-  if (!session) {
-    return withCors(NextResponse.json({ ok: false, error: 'session_not_found' }, { status: 400 }));
-  }
-  if (!session.shop) {
-    return withCors(NextResponse.json({ ok: false, error: 'session_missing_shop' }, { status: 400 }));
-  }
-  if (!session.accessToken) {
-    return withCors(NextResponse.json({ ok: false, error: 'session_missing_token' }, { status: 400 }));
-  }
+  try {
+    const session = await getAdminSession().catch(() => null);
+    if (!session) {
+      return withCors(NextResponse.json({ ok: false, error: 'session_not_found' }, { status: 400 }), req);
+    }
+    if (!session.shop) {
+      return withCors(NextResponse.json({ ok: false, error: 'session_missing_shop' }, { status: 400 }), req);
+    }
+    if (!session.accessToken) {
+      return withCors(NextResponse.json({ ok: false, error: 'session_missing_token' }, { status: 400 }), req);
+    }
 
-  const payload = await req.json();
-  const shopFromPayload = payload.shop;
+    const payload = await req.json();
+    const shopFromPayload = payload.shop;
 
-  // Ensure the coupon is being created for the shop we have a session for
-  if (shopFromPayload && session.shop !== shopFromPayload) {
-    console.warn(`Coupon creation attempt for shop ${shopFromPayload} but session is for ${session.shop}`);
-    return withCors(NextResponse.json({ ok: false, error: 'shop_mismatch' }, { status: 400 }));
-  }
+    if (shopFromPayload && session.shop !== shopFromPayload) {
+      console.warn(`Coupon creation attempt for shop ${shopFromPayload} but session is for ${session.shop}`);
+      return withCors(NextResponse.json({ ok: false, error: 'shop_mismatch' }, { status: 400 }), req);
+    }
 
-  const variables = {
-    basicCodeDiscount: {
-      title: payload.title,
-      codes: [payload.code],
-      startsAt: payload.startsAt,
-      endsAt: payload.endsAt || null,
-      usageLimit: payload.usageLimit ? Number(payload.usageLimit) : null,
-      appliesOncePerCustomer: !!payload.appliesOncePerCustomer,
-      combinesWith: {
-        orderDiscounts: !!payload.combinesWithOrder,
-        productDiscounts: !!payload.combinesWithProduct,
-        shippingDiscounts: !!payload.combinesWithShipping,
+    const variables = {
+      basicCodeDiscount: {
+        title: payload.title,
+        codes: [payload.code],
+        startsAt: payload.startsAt,
+        endsAt: payload.endsAt || null,
+        usageLimit: payload.usageLimit ? Number(payload.usageLimit) : null,
+        appliesOncePerCustomer: !!payload.appliesOncePerCustomer,
+        combinesWith: {
+          orderDiscounts: !!payload.combinesWithOrder,
+          productDiscounts: !!payload.combinesWithProduct,
+          shippingDiscounts: !!payload.combinesWithShipping,
+        },
+        customerSelection: payload.customerSegmentId
+          ? { customerSegments: { add: [payload.customerSegmentId] } }
+          : { all: true },
+        customerGets: payload.type === 'PERCENT'
+          ? { value: { percentage: Number(payload.percentage) } }
+          : { value: { amount: { amount: String(payload.amount), currencyCode: payload.currencyCode || 'EUR' } } },
+        minimumRequirement: payload.minSubtotal
+          ? { subtotal: { greaterThanOrEqualToSubtotal: { amount: String(payload.minSubtotal), currencyCode: payload.currencyCode || 'EUR' } } }
+          : payload.minQty
+          ? { quantity: { greaterThanOrEqualToQuantity: Number(payload.minQty) } }
+          : null,
+        appliesTo: payload.collectionIds?.length
+          ? { collections: { add: payload.collectionIds } }
+          : payload.productIds?.length
+          ? { products: { add: payload.productIds } }
+          : { all: true },
       },
-      customerSelection: payload.customerSegmentId
-        ? { customerSegments: { add: [payload.customerSegmentId] } }
-        : { all: true },
-      customerGets: payload.type === 'PERCENT'
-        ? { value: { percentage: Number(payload.percentage) } }
-        : { value: { amount: { amount: String(payload.amount), currencyCode: payload.currencyCode || 'EUR' } } },
-      minimumRequirement: payload.minSubtotal
-        ? { subtotal: { greaterThanOrEqualToSubtotal: { amount: String(payload.minSubtotal), currencyCode: payload.currencyCode || 'EUR' } } }
-        : payload.minQty
-        ? { quantity: { greaterThanOrEqualToQuantity: Number(payload.minQty) } }
-        : null,
-      appliesTo: payload.collectionIds?.length
-        ? { collections: { add: payload.collectionIds } }
-        : payload.productIds?.length
-        ? { products: { add: payload.productIds } }
-        : { all: true },
-    },
-  };
+    };
 
-  const r = await fetch(`https://${session.shop}/admin/api/2025-10/graphql.json`, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Access-Token': session.accessToken,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query: MUTATION, variables }),
-  });
+    const r = await fetch(`https://${session.shop}/admin/api/2025-10/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': session.accessToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query: MUTATION, variables }),
+    });
 
-  const json = await r.json();
-  const out = json?.data?.discountCodeBasicCreate;
-  if (!out || (out.userErrors && out.userErrors.length > 0)) {
-    return withCors(NextResponse.json({ ok: false, userErrors: out?.userErrors || [{ message: 'unknown_error' }] }, { status: 400 }));
+    const json = await r.json();
+    const out = json?.data?.discountCodeBasicCreate;
+    if (!out || (out.userErrors && out.userErrors.length > 0)) {
+      return withCors(NextResponse.json({ ok: false, userErrors: out?.userErrors || [{ message: 'unknown_error' }] }, { status: 400 }), req);
+    }
+
+    const node = out.codeDiscountNode;
+    const code = node?.codeDiscount?.codes?.nodes?.[0]?.code;
+    const status = node?.codeDiscount?.status;
+    return withCors(NextResponse.json({ ok: true, couponCode: code, status, nodeId: node?.id }), req);
+  } catch (err) {
+    console.error('POST /coupons/create error', err);
+    return withCors(NextResponse.json({ ok: false, error: 'server_error' }, { status: 500 }), req);
   }
-
-  const node = out.codeDiscountNode;
-  const code = node?.codeDiscount?.codes?.nodes?.[0]?.code;
-  const status = node?.codeDiscount?.status;
-  return withCors(NextResponse.json({ ok: true, couponCode: code, status, nodeId: node?.id }));
 }
