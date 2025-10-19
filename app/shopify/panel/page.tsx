@@ -793,18 +793,17 @@ export default function Panel() {
                                             {kp ? `${fmt((kp.abandonRate || 0) * 100)}%` : "—"}
                                           </TableCell>
                                           <TableCell align="right">
-                                            <Button
-                                              size="small"
-                                              variant="outlined"
-                                              endIcon={<ArrowForwardIcon />}
-                                              onClick={() => {
-                                                setSelectedCreatorId(cr.creatorId);
-                                                setTab("creator");
-                                              }}
-                                            >
-                                              Dettaglio
-                                            </Button>
-                                          </TableCell>
+                                                                                                                                        <Button
+                                                                                                                                          size="small"
+                                                                                                                                          variant="outlined"
+                                                                                                                                          endIcon={<ArrowForwardIcon />}
+                                                                                                                                          onClick={() => {
+                                                                                                                                            setSelectedCreatorId(cr.creatorId);
+                                                                                                                                            setTab("creator");
+                                                                                                                                          }}
+                                                                                                                                        >
+                                                                                                                                          Dettaglio
+                                                                                                                                        </Button>                                          </TableCell>
                                         </TableRow>
                                       );
                                     })}

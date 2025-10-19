@@ -14,6 +14,8 @@ const campaignMetricsDaily = {
     { name: "cvr", type: "number" },
     { name: "abandonRate", type: "number" },
     { name: "aov", type: "number" },
+    { name: "engagementRate", type: "number" },
+    { name: "checkoutCompletionRate", type: "number" },
   ],
 }
 

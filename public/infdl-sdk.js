@@ -31,6 +31,8 @@
   function init(opts){
     cfg=opts||{}; sid=lsGet('infdl.sid') || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
     lsSet('infdl.sid', sid);
+    if(cfg.campaignId) lsSet('infdl.ci', cfg.campaignId);
+    if(cfg.creatorId) lsSet('infdl.cr', cfg.creatorId);
     try{
       var u=new URL(location.href);
       var ci=u.searchParams.get('ci'), cr=u.searchParams.get('cr'), ck=u.searchParams.get('ck');

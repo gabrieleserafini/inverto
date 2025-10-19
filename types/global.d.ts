@@ -1,13 +1,11 @@
 export {};
 
 declare global {
-  type InfdlInit = {
-    endpoint: string;
-    campaignId?: string;
-    brandId?: string;
-    source?: 'shopify' | 'gtm' | 'custom';
-    consent?: boolean;
-  };
+interface InfdlInit {
+  endpoint: string;
+  campaignId: string;
+  creatorId?: string;
+}
 
   interface InfdlSDK {
     init(opts: InfdlInit): void;

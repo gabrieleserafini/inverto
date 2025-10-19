@@ -18,6 +18,12 @@ export async function aggregateDay(dayISO: string) {
     { start, end }
   );
 
+  const campaigns = await sanity.fetch<{ _id: string, campaignId: string }[]>(`*[_type=="campaign"]{ _id, campaignId }`);
+  const campaignMap = new Map(campaigns.map(c => [c.campaignId, c._id]));
+
+  const creators = await sanity.fetch<{ _id: string, creatorId: string }[]>(`*[_type=="creator"]{ _id, creatorId }`);
+  const creatorMap = new Map(creators.map(c => [c.creatorId, c._id]));
+
   const buckets = new Map<string, Bucket>();
   const add = (k: string, field: keyof Bucket, inc: number) => {
     const b = buckets.get(k) ?? { pageViews: 0, addToCart: 0, beginCheckout: 0, purchases: 0, revenue: 0 };
@@ -46,16 +52,23 @@ export async function aggregateDay(dayISO: string) {
     const [campaignId, creatorIdRaw] = key.split('|');
     const creatorId = creatorIdRaw || undefined;
 
+    const campaignRef = campaignMap.get(campaignId);
+    if (!campaignRef) continue;
+
+    const creatorRef = creatorId ? creatorMap.get(creatorId) : undefined;
+
     const base = v.beginCheckout || v.addToCart || 0;
     const cvr = base ? v.purchases / base : 0;
     const abandonRate = v.addToCart ? 1 - (v.purchases / v.addToCart) : 0;
     const aov = v.purchases ? v.revenue / v.purchases : 0;
+    const engagementRate = v.pageViews ? v.addToCart / v.pageViews : 0;
+    const checkoutCompletionRate = v.beginCheckout ? v.purchases / v.beginCheckout : 0;
 
     await sanity.createOrReplace({
-      _id: `cmd-${campaignId}-${creatorId ?? 'all'}-${dayISO}`,
-      _type: 'campaignMetricsDaily',
-      campaignId,
-      creatorId,               
+      _id: `metric-${campaignId}-${creatorId ?? 'all'}-${dayISO}`,
+      _type: 'metricDaily',
+      campaignRef: { _type: 'reference', _ref: campaignRef },
+      creatorRef: creatorRef ? { _type: 'reference', _ref: creatorRef } : undefined,
       date: dayISO,             
       pageViews: v.pageViews,
       addToCart: v.addToCart,
@@ -65,6 +78,8 @@ export async function aggregateDay(dayISO: string) {
       cvr: round2(cvr),
       abandonRate: round2(abandonRate),
       aov: round2(aov),
+      engagementRate: round2(engagementRate),
+      checkoutCompletionRate: round2(checkoutCompletionRate),
     });
   }
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
 import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
@@ -24,16 +25,23 @@ import Button from '@mui/material/Button';
 import DownloadIcon from '@mui/icons-material/Download';
 import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ReplayIcon from '@mui/icons-material/Replay';
+import HomeIcon from '@mui/icons-material/Home';
+import InfoIcon from '@mui/icons-material/Info';
+import AddIcon from '@mui/icons-material/Add';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import PercentIcon from '@mui/icons-material/Percent';
+import TouchAppIcon from '@mui/icons-material/TouchApp';
+import CreditScoreIcon from '@mui/icons-material/CreditScore';
 
 import {
   ResponsiveContainer,
   AreaChart,
   Area,
   LineChart,
+  ComposedChart,
   Line,
   BarChart,
   Bar,
@@ -44,8 +52,82 @@ import {
   Legend,
 } from 'recharts';
 
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
+
+import useSWR from 'swr';
+
 import Chart from './Chart';
+
+function AddCreatorInline({ campaignId, onAdded }: { campaignId: string; onAdded: () => void }) {
+  const [creatorId, setCreatorId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [snack, setSnack] = useState<{ open: boolean; msg: string; severity: "success" | "error" }>({ open: false, msg: "", severity: "success" });
+  const notify = (m: string, s: "success" | "error" = "success") => setSnack({ open: true, msg: m, severity: s });
+
+  const onAdd = async () => {
+    if (!creatorId.trim()) return notify("Inserisci un Creator ID", "error");
+    try {
+      setLoading(true);
+      const r = await fetch(`/api/dashboard/campaigns/${campaignId}/creators`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ creatorId }),
+      });
+      const j: { ok: boolean; error?: string } = await r.json();
+      if (j.ok) {
+        setCreatorId("");
+        onAdded();
+        notify("Creator aggiunto");
+      } else notify(j.error || "Errore", "error");
+    } catch (e) {
+      notify((e as Error).message, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+      <TextField
+        label="Creator ID"
+        size="small"
+        value={creatorId}
+        onChange={(e) => setCreatorId(e.target.value)}
+        sx={{
+          mb: 0,
+          "& .MuiInputBase-root": { bgcolor: "rgba(255,255,255,0.06)", color: "white" },
+          "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.8)" },
+          "& .MuiOutlinedInput-notchedOutline": { borderColor: "rgba(255,255,255,0.2)" },
+        }}
+      />
+      <Button variant="outlined" startIcon={<AddIcon />} onClick={onAdd} disabled={loading}>
+        Aggiungi creator
+      </Button>
+
+      <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((s) => ({ ...s, open: false }))} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}>
+        <Alert onClose={() => setSnack((s) => ({ ...s, open: false }))} severity={snack.severity} variant="filled">
+          {snack.msg}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}
 import { DailyPoint } from '@/lib/server/metrics';
+
+type CreatorPerformance = {
+  _id: string;
+  creatorId: string;
+  creatorName?: string;
+  shortCode?: string;
+  kpis: DailyPoint | null;
+};
+
+type CreatorsPerformanceResponse = {
+  ok: true;
+  creators: CreatorPerformance[];
+};
+
 
 type SortKey =
   | 'date'
@@ -56,7 +138,9 @@ type SortKey =
   | 'revenue'
   | 'cvr'
   | 'abandonRate'
-  | 'aov';
+  | 'aov'
+  | 'engagementRate'
+  | 'checkoutCompletionRate';
 type SortState = { key: SortKey; dir: 'asc' | 'desc' };
 
 const fmt = (n?: number, digits = 2) =>
@@ -79,12 +163,14 @@ function KPI({
   icon,
   spark,
   delta,
+  description,
 }: {
   title: string;
   value: string;
   icon?: React.ReactNode;
   spark?: number[];
   delta?: number;
+  description?: string;
 }) {
   const iconColor = 'rgba(173,200,255,0.95)';
   const deltaText =
@@ -110,6 +196,11 @@ function KPI({
           <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
             {title}
           </Typography>
+          {description && (
+            <Tooltip title={description}>
+              <InfoIcon sx={{ fontSize: '1rem', color: 'rgba(255,255,255,0.5)' }} />
+            </Tooltip>
+          )}
         </Box>
 
         <Typography variant="h4" fontWeight={800} sx={{ color: 'white' }}>
@@ -152,19 +243,29 @@ function KPI({
 
 function DualAxisChart({ data }: { data: DailyPoint[] }) {
   const series = useMemo(
-    () =>
-      data.map((d) => ({
+    () => {
+      const mapped = data.map((d) => ({
         date: d.date,
         revenue: d.revenue ?? 0,
         purchases: d.purchases ?? 0,
-      })),
+      }));
+      if (mapped.length === 1) {
+        const pointDate = new Date(mapped[0].date);
+        pointDate.setDate(pointDate.getDate() - 1);
+        return [
+          { date: pointDate.toISOString().slice(0,10), revenue: 0, purchases: 0 },
+          ...mapped,
+        ];
+      }
+      return mapped;
+    },
     [data]
   );
 
   return (
     <Box sx={{ width: '100%', height: 320 }}>
       <ResponsiveContainer>
-        <LineChart data={series}>
+        <ComposedChart data={series}>
           <defs>
             <linearGradient id="revLine" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#00E5FF" stopOpacity={1} />
@@ -177,9 +278,9 @@ function DualAxisChart({ data }: { data: DailyPoint[] }) {
           <YAxis yAxisId="right" orientation="right" stroke="rgba(255,255,255,0.7)" />
           <RTooltip contentStyle={{ backgroundColor: '#0B1020', border: '1px solid #26324d', color: '#fff' }} />
           <Legend wrapperStyle={{ color: '#fff' }} />
+          <Bar yAxisId="right" dataKey="purchases" name="Acquisti" fill="#82B1FF" />
           <Line yAxisId="left" type="monotone" dataKey="revenue" name="Revenue €" stroke="url(#revLine)" strokeWidth={2} dot={false} />
-          <Line yAxisId="right" type="monotone" dataKey="purchases" name="Acquisti" stroke="#82B1FF" strokeWidth={2} dot={false} />
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </Box>
   );
@@ -231,6 +332,8 @@ export default function Dashboard({
   const pathname = usePathname();
   const search = useSearchParams();
 
+  const [isAggregating, setIsAggregating] = useState(false);
+
   const [campaignId, setCampaignId] = useState(initialCampaignId);
   const [creatorId, setCreatorId] = useState(initialCreatorId);
 
@@ -251,25 +354,42 @@ export default function Dashboard({
 
   const last = filtered.at(-1);
   const sparkWindow = 14;
-  const sparkRevenue = filtered.slice(-sparkWindow).map((d) => d.revenue ?? 0);
-  const sparkPurchases = filtered.slice(-sparkWindow).map((d) => d.purchases ?? 0);
-  const sparkCVR = filtered.slice(-sparkWindow).map((d) => (d.cvr ?? 0) * 100);
+  const addZeroStart = (arr: number[]) => arr.length === 1 ? [0, ...arr] : arr;
+  const sparkRevenue = addZeroStart(filtered.slice(-sparkWindow).map((d) => d.revenue ?? 0));
+  const sparkPurchases = addZeroStart(filtered.slice(-sparkWindow).map((d) => d.purchases ?? 0));
+  const sparkCVR = addZeroStart(filtered.slice(-sparkWindow).map((d) => (d.cvr ?? 0) * 100));
+  const sparkEngagementRate = addZeroStart(filtered.slice(-sparkWindow).map((d) => (d.engagementRate ?? 0) * 100));
+  const sparkCheckoutCompletionRate = addZeroStart(filtered.slice(-sparkWindow).map((d) => (d.checkoutCompletionRate ?? 0) * 100));
 
   const len = filtered.length;
   const prev = len > 0 ? initialData.slice(-2 * len, -len) : [];
   const deltaRevenue = deltaPct(last?.revenue, prev.at(-1)?.revenue);
   const deltaPurchases = deltaPct(last?.purchases, prev.at(-1)?.purchases);
   const deltaCVR = deltaPct(last?.cvr, prev.at(-1)?.cvr);
+  const deltaEngagementRate = deltaPct(last?.engagementRate, prev.at(-1)?.engagementRate);
+  const deltaCheckoutCompletionRate = deltaPct(last?.checkoutCompletionRate, prev.at(-1)?.checkoutCompletionRate);
 
   const kpis = useMemo(
     () => [
-      { title: 'Revenue',   value: `€ ${fmt(last?.revenue)}`,   icon: <MonetizationOnIcon fontSize="small" />, spark: sparkRevenue,   delta: deltaRevenue },
-      { title: 'Acquisti',  value: fmt(last?.purchases, 0),     icon: <ShoppingCartIcon fontSize="small" />,  spark: sparkPurchases, delta: deltaPurchases },
-      { title: 'CVR',       value: last ? `${fmt((last.cvr ?? 0) * 100)}%` : '-', icon: <PercentIcon fontSize="small" />, spark: sparkCVR, delta: deltaCVR },
-      { title: 'AOV',       value: `€ ${fmt(last?.aov)}`,        icon: <TrendingUpIcon fontSize="small" /> },
+      { title: 'Revenue',   value: `€ ${fmt(last?.revenue)}`,   icon: <MonetizationOnIcon fontSize="small" />, spark: sparkRevenue,   delta: deltaRevenue, description: 'Totale delle vendite generate.' },
+      { title: 'Acquisti',  value: fmt(last?.purchases, 0),     icon: <ShoppingCartIcon fontSize="small" />,  spark: sparkPurchases, delta: deltaPurchases, description: 'Numero totale di acquisti.' },
+      { title: 'CVR',       value: last ? `${fmt((last.cvr ?? 0) * 100)}%` : '-', icon: <PercentIcon fontSize="small" />, spark: sparkCVR, delta: deltaCVR, description: 'Tasso di conversione, (Acquisti / Click) * 100.' },
+      { title: 'AOV',       value: `€ ${fmt(last?.aov)}`,        icon: <TrendingUpIcon fontSize="small" />, description: 'Valore medio dell\'ordine, Revenue / Acquisti.' },
+      { title: 'Tasso di Engagement', value: last ? `${fmt((last.engagementRate ?? 0) * 100)}%` : '-', icon: <TouchAppIcon fontSize="small" />, spark: sparkEngagementRate, delta: deltaEngagementRate, description: 'Misura l\'interesse verso i prodotti, (Aggiunte al carrello / Page Views) * 100.' },
+      { title: 'Tasso Completamento Checkout', value: last ? `${fmt((last.checkoutCompletionRate ?? 0) * 100)}%` : '-', icon: <CreditScoreIcon fontSize="small" />, spark: sparkCheckoutCompletionRate, delta: deltaCheckoutCompletionRate, description: 'Percentuale di utenti che completano l\'acquisto dopo aver iniziato il checkout, (Acquisti / Inizio Checkout) * 100.' },
     ],
-    [last, deltaRevenue, deltaPurchases, deltaCVR, sparkRevenue, sparkPurchases, sparkCVR]
+    [last, deltaRevenue, deltaPurchases, deltaCVR, deltaEngagementRate, deltaCheckoutCompletionRate, sparkRevenue, sparkPurchases, sparkCVR, sparkEngagementRate, sparkCheckoutCompletionRate]
   );
+
+  const triggerAggregation = useCallback(async () => {
+    setIsAggregating(true);
+    try {
+      await fetch('/api/cron/aggregate', { method: 'GET' });
+      router.refresh();
+    } finally {
+      setIsAggregating(false);
+    }
+  }, [router]);
 
   const applyQuery = useCallback(
     (nextCampaignId: string, nextCreatorId: string) => {
@@ -306,6 +426,11 @@ export default function Dashboard({
     if (v !== appliedCreatorRef.current) applyQuery(campaignId, v);
   };
 
+  const { data: creatorsPerformance, mutate: refetchCreatorsPerformance } = useSWR<CreatorsPerformanceResponse>(
+    initialCampaignId ? `/api/dashboard/campaigns/${initialCampaignId}/creators/performance` : null,
+    (url) => fetch(url).then((res) => res.json()),
+  );
+
   const [sort, setSort] = useState<SortState>({ key: 'date', dir: 'asc' });
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -324,9 +449,9 @@ export default function Dashboard({
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
   const exportCsv = () => {
-    const header = ['date','pageViews','addToCart','beginCheckout','purchases','revenue','cvr','abandonRate','aov'];
+    const header = ['date','pageViews','addToCart','beginCheckout','purchases','revenue','cvr','abandonRate','aov','engagementRate','checkoutCompletionRate'];
     const rows = filtered.map((d) => [
-      d.date, d.pageViews ?? 0, d.addToCart ?? 0, d.beginCheckout ?? 0, d.purchases ?? 0, d.revenue ?? 0, d.cvr ?? 0, d.abandonRate ?? 0, d.aov ?? 0,
+      d.date, d.pageViews ?? 0, d.addToCart ?? 0, d.beginCheckout ?? 0, d.purchases ?? 0, d.revenue ?? 0, d.cvr ?? 0, d.abandonRate ?? 0, d.aov ?? 0, d.engagementRate ?? 0, d.checkoutCompletionRate ?? 0,
     ]);
     const csv = header.join(',') + '\n' + rows.map((r) => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -367,9 +492,19 @@ export default function Dashboard({
           <Typography variant="h4" fontWeight={800} sx={{ flex: 1, color: 'white' }}>
             Inverto - Campaign Result
           </Typography>
+          <Tooltip title="Home">
+            <IconButton component={Link} href="/" sx={{ color: iconColor }}>
+              <HomeIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Aggrega dati (forza ricalcolo)">
+            <IconButton onClick={triggerAggregation} disabled={isAggregating} sx={{ color: iconColor }}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Ricarica (mantiene i filtri locali)">
             <IconButton onClick={() => location.reload()} sx={{ color: iconColor }}>
-              <RefreshIcon />
+              <ReplayIcon />
             </IconButton>
           </Tooltip>
           <Tooltip title="Esporta CSV (range filtrato)">
@@ -469,10 +604,12 @@ export default function Dashboard({
           </CardContent>
         </Card>
 
+
+
         <Grid container spacing={2} alignItems="stretch" sx={{ mb: 1 }}>
           {kpis.map((k) => (
             <Grid key={k.title} size={{ xs: 12, sm: 6, md: 3 }}>
-              <KPI title={k.title} value={k.value} icon={k.icon} spark={k.spark} delta={k.delta} />
+              <KPI title={k.title} value={k.value} icon={k.icon} spark={k.spark} delta={k.delta} description={k.description} />
             </Grid>
           ))}
         </Grid>
@@ -562,6 +699,8 @@ export default function Dashboard({
                         { key: 'cvr', label: 'CVR %' },
                         { key: 'abandonRate', label: 'Abbandono %' },
                         { key: 'aov', label: 'AOV (€)' },
+                        { key: 'engagementRate', label: 'Engagement %' },
+                        { key: 'checkoutCompletionRate', label: 'Compl. Checkout %' },
                       ] as { key: SortKey; label: string }[]).map((c) => (
                         <TableCell
                           key={c.key}
@@ -593,6 +732,8 @@ export default function Dashboard({
                         <TableCell align="right">{fmt((d.cvr ?? 0) * 100)}</TableCell>
                         <TableCell align="right">{fmt((d.abandonRate ?? 0) * 100)}</TableCell>
                         <TableCell align="right">{fmt(d.aov)}</TableCell>
+                        <TableCell align="right">{fmt((d.engagementRate ?? 0) * 100)}</TableCell>
+                        <TableCell align="right">{fmt((d.checkoutCompletionRate ?? 0) * 100)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -601,6 +742,87 @@ export default function Dashboard({
             </Card>
           </Grid>
         </Grid>
+
+        <Card
+          variant="outlined"
+          sx={{
+            mb: 3,
+            borderRadius: 3,
+            borderColor: 'rgba(255,255,255,0.08)',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.25) 100%)',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <CardContent>
+            <Typography variant="h6" gutterBottom sx={{ color: 'white' }}>
+              Aggiungi Creator
+            </Typography>
+            <AddCreatorInline campaignId={initialCampaignId} onAdded={() => refetchCreatorsPerformance()} />
+          </CardContent>
+        </Card>
+
+        <Card
+          variant="outlined"
+          sx={{
+            mb: 3,
+            borderRadius: 3,
+            borderColor: 'rgba(255,255,255,0.08)',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.25) 100%)',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <CardContent>
+            <Typography variant="h6" gutterBottom sx={{ color: 'white' }}>
+              {initialCreatorId ? 'Other Creators' : 'Creators'}
+            </Typography>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: '#0B1020', borderBottomColor: 'rgba(255,255,255,0.12)' }}>Creator</TableCell>
+                  <TableCell sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: '#0B1020', borderBottomColor: 'rgba(255,255,255,0.12)' }} align="right">Revenue</TableCell>
+                  <TableCell sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: '#0B1020', borderBottomColor: 'rgba(255,255,255,0.12)' }} align="right">Acquisti</TableCell>
+                  <TableCell sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: '#0B1020', borderBottomColor: 'rgba(255,255,255,0.12)' }} align="right">CVR</TableCell>
+                  <TableCell sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: '#0B1020', borderBottomColor: 'rgba(255,255,255,0.12)' }}></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {creatorsPerformance?.creators
+                  .filter((c) => !initialCreatorId || c.creatorId !== initialCreatorId.trim())
+                  .map((c) => (
+                  <TableRow key={c._id} hover sx={{ '& td': { color: 'rgba(255,255,255,0.85)' } }}>
+                    <TableCell>{c.creatorName || c.creatorId}</TableCell>
+                    <TableCell align="right">{fmt(c.kpis?.revenue)}</TableCell>
+                    <TableCell align="right">{fmt(c.kpis?.purchases, 0)}</TableCell>
+                    <TableCell align="right">{fmt((c.kpis?.cvr ?? 0) * 100)}%</TableCell>
+                    <TableCell align="right">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => window.open(`/test-events?ci=${initialCampaignId}&cr=${c.creatorId}`, '_blank')}
+                      >
+                        Test
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <Box sx={{ width: '100%', height: 320, mt: 2 }}>
+              <ResponsiveContainer>
+                <BarChart data={creatorsPerformance?.creators
+                  .filter((c) => !initialCreatorId || c.creatorId !== initialCreatorId.trim())
+                  .map(c => ({ name: c.creatorName || c.creatorId, revenue: c.kpis?.revenue || 0 }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                  <XAxis dataKey="name" stroke="rgba(255,255,255,0.7)" />
+                  <YAxis stroke="rgba(255,255,255,0.7)" />
+                  <RTooltip contentStyle={{ backgroundColor: '#0B1020', border: '1px solid #26324d', color: '#fff' }} />
+                  <Legend wrapperStyle={{ color: '#fff' }} />
+                  <Bar dataKey="revenue" fill="#8884d8" name="Revenue €" />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
+          </CardContent>
+        </Card>
       </Container>
     </Box>
   );

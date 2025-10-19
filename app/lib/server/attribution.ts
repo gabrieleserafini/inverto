@@ -26,7 +26,7 @@ export async function resolveAttribution(evt: {
   utm?: Record<string, string>;
   payload?: Record<string, unknown>;   
 }) {
-  if (evt.creatorId) return { campaignId: evt.campaignId, creatorId: evt.creatorId };
+  if (evt.creatorId && evt.creatorId.length > 0) return { campaignId: evt.campaignId, creatorId: evt.creatorId };
 
   const coupon =
     typeof evt.payload?.['coupon'] === 'string' ? (evt.payload['coupon'] as string) : undefined;

@@ -10,6 +10,8 @@ export type DailyPoint = {
   cvr?: number;
   abandonRate?: number;
   aov?: number;
+  engagementRate?: number;
+  checkoutCompletionRate?: number;
 };
 
 export async function getDailyMetrics(
@@ -20,9 +22,12 @@ export async function getDailyMetrics(
     *[
       _type=="metricDaily"
       && campaignRef->campaignId==$campaignId
-      && ($creatorId == null || creatorRef->creatorId==$creatorId)
+      && (
+        ($creatorId != null && creatorRef->creatorId == $creatorId) ||
+        ($creatorId == null && !defined(creatorRef))
+      )
     ] | order(date asc){
-      date, pageViews, addToCart, beginCheckout, purchases, revenue, cvr, abandonRate, aov
+      date, pageViews, addToCart, beginCheckout, purchases, revenue, cvr, abandonRate, aov, engagementRate, checkoutCompletionRate
     }
   `;
   return sanity.fetch<DailyPoint[]>(q, { campaignId, creatorId: creatorId ?? null });
