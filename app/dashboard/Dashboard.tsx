@@ -40,7 +40,6 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  LineChart,
   ComposedChart,
   Line,
   BarChart,

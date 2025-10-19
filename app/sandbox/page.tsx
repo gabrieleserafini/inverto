@@ -1,9 +1,11 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 
-export default function Sandbox() {
+export const dynamic = 'force-dynamic';
+
+function SandboxInner() {
   const searchParams = useSearchParams();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -15,18 +17,20 @@ export default function Sandbox() {
     if (!iframe || !url) return;
 
     const handleLoad = () => {
+      // NOTE: Accessing iframe DOM only works if `url` is same-origin.
       const s = iframe.contentDocument?.createElement('script');
       if (!s) return;
 
       s.src = '/infdl-sdk.js';
       s.async = true;
       s.onload = () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const win = iframe.contentWindow as any;
         if (win && win.infdl) {
-          win.infdl.init({ 
-            endpoint: '/api/track', 
-            source: 'custom', 
-            ...(campaignId && { campaignId }) 
+          win.infdl.init({
+            endpoint: '/api/track',
+            source: 'custom',
+            ...(campaignId && { campaignId }),
           });
         } else {
           console.error('SDK loaded but window.infdl is undefined in iframe');
@@ -64,5 +68,13 @@ export default function Sandbox() {
         title="Sandbox"
       />
     </div>
+  );
+}
+
+export default function SandboxPage() {
+  return (
+    <Suspense fallback={<main style={{ padding: 24 }}>Loading sandbox…</main>}>
+      <SandboxInner />
+    </Suspense>
   );
 }
